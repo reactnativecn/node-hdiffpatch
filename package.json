@@ -1,0 +1,29 @@
+{
+  "name": "node-hdiffpatch",
+  "version": "0.1.5",
+  "description": "hdiffpatch port to node.js",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/test.js"
+  },
+  "gypfile": true,
+  "author": "housisong",
+  "license": "MIT",
+  "dependencies": {
+    "nan": "^2.14.0"
+  },
+  "devDependencies": {
+    "md5": "^2.2.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reactnativecn/node-hdiffpatch"
+  },
+  "keywords": [
+    "hdiffpatch"
+  ],
+  "bugs": {
+    "url": "https://github.com/reactnativecn/node-hdiffpatch/issues"
+  },
+  "homepage": "https://github.com/reactnativecn/node-hdiffpatch#readme"
+}
