@@ -4,7 +4,8 @@
   "description": "hdiffpatch port to node.js",
   "main": "index.js",
   "scripts": {
-    "test": "node test/test.js"
+    "test": "node test/test.js",
+    "prepack": "git submodule update --init --recursive"
   },
   "gypfile": true,
   "author": "housisong",
