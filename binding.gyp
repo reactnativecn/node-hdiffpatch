@@ -6,7 +6,6 @@
         "src/main.cc",
         "src/hdiff.cpp",
         "HDiffPatch/libHDiffPatch/HPatch/patch.c",
-        "HDiffPatch/file_for_patch.c",
         "HDiffPatch/libHDiffPatch/HDiff/diff.cpp",
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/bytes_rle.cpp",
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/suffix_string.cpp",
