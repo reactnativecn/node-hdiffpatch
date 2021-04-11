@@ -1,6 +1,6 @@
 {
   "name": "node-hdiffpatch",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "hdiffpatch port to node.js",
   "main": "index.js",
   "scripts": {

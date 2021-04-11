@@ -38,7 +38,8 @@ namespace hdiffpatchNode
       Local<Value> argv[1] = { returnObj };
       // opaque->cb->Call(Nan::GetCurrentContext()->Global(), Null(opaque->isolate), 1, argv);
 
-      Nan::MakeCallback(Nan::GetCurrentContext()->Global(), opaque->cb, 1, argv);
+      Nan::AsyncResource ar("hdiff_callback");
+      ar.runInAsyncScope(Nan::GetCurrentContext()->Global(), opaque->cb, 1, argv);
 
       return 0;
     }
