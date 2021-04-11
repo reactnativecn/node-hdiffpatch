@@ -5,6 +5,7 @@
 #include <node.h>
 #include <node_buffer.h>
 #include <cstdlib>
+#include <string>
 #include "hdiff.h"
 
 using namespace std;
@@ -63,10 +64,11 @@ namespace hdiffpatchNode
         try{
             hdiff((const uint8_t*)oldData,oldLength,(const uint8_t*)newData,newLength,codeBuf);
         }catch(const std::exception& e){
-            Nan::ThrowError("Create hdiff failed.");
+            std::string errInfo("Create hdiff failed : "); errInfo+=e.what();
+            Nan::ThrowError(errInfo.c_str());
         }
         if (0!=callback_write(&streamOpaque,codeBuf.data(),codeBuf.size()))
-            Nan::ThrowError("Write DiffStreamOpaque failed.");
+            Nan::ThrowError("Create hdiff failed : Write data to DiffStreamOpaque fail.");
 
 //        args.GetReturnValue().Set(returnObj);
 //        args.GetReturnValue().Set(String::NewFromUtf8(isolate, bufferData, String::kNormalString, bufferLength));

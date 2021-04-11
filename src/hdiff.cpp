@@ -32,6 +32,6 @@ void hdiff(const uint8_t* old,size_t oldsize,const uint8_t* _new,size_t newsize,
     
     if (!check_single_compressed_diff(_new,_new+newsize,old,old+oldsize,out_codeBuf.data(),
                                       out_codeBuf.data()+out_codeBuf.size(),decompressPlugin)){
-        throw std::runtime_error("create_single_compressed_diff() out data error!"); 
+        throw std::runtime_error("check_single_compressed_diff() fail, diff code error!"); 
     }
 }
