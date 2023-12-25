@@ -4,6 +4,7 @@
 
 #ifndef HDIFFPATCH_DIFF_H
 #define HDIFFPATCH_DIFF_H
+#include <stddef.h>
 #include <stdint.h>
 #include <vector>
 
