@@ -7,7 +7,6 @@ try {
   native = require('./build/Release/hdiffpatch');
 } catch(e) {
   console.error(e);
-  native = require('./build/Debug/hdiffpatch');
 }
 exports.native = native;
 
