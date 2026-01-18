@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node test/test.js",
+    "benchmark": "node --expose-gc test/benchmark.js",
     "prepack": "git submodule update --init --recursive"
   },
   "gypfile": true,

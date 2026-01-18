@@ -5,6 +5,7 @@
       "sources": [
         "src/main.cc",
         "src/hdiff.cpp",
+        "src/hpatch.cpp",
         "HDiffPatch/libHDiffPatch/HPatch/patch.c",
         "HDiffPatch/libHDiffPatch/HDiff/diff.cpp",
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/bytes_rle.cpp",

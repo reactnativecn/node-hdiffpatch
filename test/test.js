@@ -1,21 +1,68 @@
 var hdiffpatch = require("../index");
-var test_hdiffpatch = require("../index_test");
 var crypto = require("crypto");
-var md5 = require("md5");
 var assert = require("assert").strict;
 
-var cur = crypto.randomBytes(40960);
-
-var ref = Buffer.concat([
-  Buffer.from("fdsa"),
-  cur.slice(0, 4096),
-  Buffer.from("asdf"),
-  cur.slice(4096),
-  Buffer.from("asdf")
+console.log("Test 1: diff + patch = original (sync)...");
+var oldData = crypto.randomBytes(40960);
+var newData = Buffer.concat([
+  Buffer.from("prefix_"),
+  oldData.slice(0, 4096),
+  Buffer.from("_middle_"),
+  oldData.slice(4096),
+  Buffer.from("_suffix")
 ]);
 
-assert.deepStrictEqual(
-  md5(hdiffpatch.diff(cur, ref)),
-  md5(test_hdiffpatch.diff(cur, ref))
-);
-console.log("pass");
+var diffResult = hdiffpatch.diff(oldData, newData);
+console.log("  oldData size:", oldData.length);
+console.log("  newData size:", newData.length);
+console.log("  diff size:", diffResult.length);
+
+var patchedData = hdiffpatch.patch(oldData, diffResult);
+assert.deepStrictEqual(patchedData, newData);
+console.log("  ✓ patch(old, diff(old, new)) === new");
+
+console.log("\nTest 2: Same data diff...");
+var sameData = Buffer.from("Hello World".repeat(100));
+var sameDiff = hdiffpatch.diff(sameData, sameData);
+console.log("  data size:", sameData.length, "diff size:", sameDiff.length);
+assert(sameDiff.length < sameData.length);
+var samePatch = hdiffpatch.patch(sameData, sameDiff);
+assert.deepStrictEqual(samePatch, sameData);
+console.log("  ✓ Same data works");
+
+console.log("\nTest 3: Large data (100KB) sync...");
+var largeOld = crypto.randomBytes(1024 * 100);
+var largeNew = Buffer.concat([Buffer.from("header"), largeOld, Buffer.from("footer")]);
+var largeDiff = hdiffpatch.diff(largeOld, largeNew);
+var largePatched = hdiffpatch.patch(largeOld, largeDiff);
+assert.deepStrictEqual(largePatched, largeNew);
+console.log("  ✓ Large data sync works");
+
+console.log("\nTest 4: TypedArray support...");
+var uint8Old = new Uint8Array(oldData);
+var uint8New = new Uint8Array(newData);
+var uint8Diff = hdiffpatch.diff(uint8Old, uint8New);
+var uint8Patched = hdiffpatch.patch(uint8Old, uint8Diff);
+assert.deepStrictEqual(Buffer.from(uint8Patched), newData);
+console.log("  ✓ Uint8Array works");
+
+console.log("\nTest 5: Async diff + patch (Promise)...");
+(async () => {
+  var asyncOld = crypto.randomBytes(1024 * 500); // 500KB
+  var asyncNew = Buffer.concat([Buffer.from("async_"), asyncOld.slice(1000)]);
+  
+  console.log("  Starting async diff (500KB)...");
+  var startDiff = Date.now();
+  var asyncDiffResult = await hdiffpatch.diffAsync(asyncOld, asyncNew);
+  console.log("  Async diff took:", Date.now() - startDiff, "ms");
+  
+  console.log("  Starting async patch...");
+  var startPatch = Date.now();
+  var asyncPatched = await hdiffpatch.patchAsync(asyncOld, asyncDiffResult);
+  console.log("  Async patch took:", Date.now() - startPatch, "ms");
+  
+  assert.deepStrictEqual(asyncPatched, asyncNew);
+  console.log("  ✓ Async diff + patch works");
+  
+  console.log("\n✅ All tests passed!");
+})();

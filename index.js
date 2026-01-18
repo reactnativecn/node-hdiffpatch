@@ -1,7 +1,3 @@
-/**
- * Created by housisong on 2021.04.06.
- */
-
 var native;
 try {
   native = require('./build/Release/hdiffpatch');
@@ -10,11 +6,25 @@ try {
 }
 exports.native = native;
 
-exports.diff = function(oldBuf, newBuf) {
-  var buffers = [];
-  native.diff(oldBuf, newBuf, function(output){
-    buffers.push(output);
-  });
+// 同步版本
+exports.diff = native.diff;
+exports.patch = native.patch;
 
-  return Buffer.concat(buffers);
-}
+// 异步版本 (Promise)
+exports.diffAsync = function(oldBuf, newBuf) {
+  return new Promise((resolve, reject) => {
+    native.diff(oldBuf, newBuf, (err, result) => {
+      if (err) reject(err);
+      else resolve(result);
+    });
+  });
+};
+
+exports.patchAsync = function(oldBuf, diffBuf) {
+  return new Promise((resolve, reject) => {
+    native.patch(oldBuf, diffBuf, (err, result) => {
+      if (err) reject(err);
+      else resolve(result);
+    });
+  });
+};
