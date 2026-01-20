@@ -1,6 +1,6 @@
 {
   "name": "node-hdiffpatch",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "hdiffpatch port to node.js",
   "main": "index.js",
   "scripts": {
@@ -9,10 +9,10 @@
     "prepack": "git submodule update --init --recursive"
   },
   "gypfile": true,
-  "author": "housisong",
+  "author": "housisong, sunnylqm",
   "license": "MIT",
   "dependencies": {
-    "nan": "^2.24.0"
+    "node-addon-api": "^8.5.0"
   },
   "devDependencies": {
     "md5": "^2.3.0"

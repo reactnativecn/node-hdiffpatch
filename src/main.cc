@@ -1,54 +1,42 @@
 /**
- * Created by housisong on 2021.04.07.
- * Optimized for node-hdiffpatch with async support for large files
+ * node-hdiffpatch - Node-API implementation
+ * Refactored from NAN for Bun compatibility
+ * Created by housisong on 2021.04.07, refactored 2026.01.20
  */
-#include <nan.h>
-#include <node.h>
-#include <node_buffer.h>
+#include <napi.h>
 #include <cstdlib>
 #include <string>
+#include <vector>
 #include "hdiff.h"
 #include "hpatch.h"
 
 namespace hdiffpatchNode
 {
-    using v8::FunctionCallbackInfo;
-    using v8::HandleScope;
-    using v8::Isolate;
-    using v8::Local;
-    using v8::Object;
-    using v8::Value;
-    using v8::ArrayBufferView;
-
     // Helper: 从参数获取数据指针和长度（支持 Buffer 和 TypedArray）
-    inline bool getBufferData(const Local<Value>& arg, const uint8_t** data, size_t* length) {
-        if (node::Buffer::HasInstance(arg)) {
-            *data = (const uint8_t*)node::Buffer::Data(arg);
-            *length = node::Buffer::Length(arg);
+    inline bool getBufferData(const Napi::Value& arg, const uint8_t** data, size_t* length) {
+        if (arg.IsBuffer()) {
+            Napi::Buffer<uint8_t> buf = arg.As<Napi::Buffer<uint8_t>>();
+            *data = buf.Data();
+            *length = buf.Length();
             return true;
         }
-        if (arg->IsArrayBufferView()) {
-            Local<ArrayBufferView> view = arg.As<ArrayBufferView>();
-            *data = (const uint8_t*)view->Buffer()->Data() + view->ByteOffset();
-            *length = view->ByteLength();
+        if (arg.IsTypedArray()) {
+            Napi::TypedArray typedArray = arg.As<Napi::TypedArray>();
+            Napi::ArrayBuffer arrayBuffer = typedArray.ArrayBuffer();
+            *data = static_cast<const uint8_t*>(arrayBuffer.Data()) + typedArray.ByteOffset();
+            *length = typedArray.ByteLength();
             return true;
         }
         return false;
     }
 
-    // 自定义删除器，用于 Buffer::New 的外部内存管理
-    static void vectorDeleter(char* data, void* hint) {
-        std::vector<uint8_t>* vec = static_cast<std::vector<uint8_t>*>(hint);
-        delete vec;
-    }
-
     // ============ 异步 Diff Worker ============
-    class DiffAsyncWorker : public Nan::AsyncWorker {
+    class DiffAsyncWorker : public Napi::AsyncWorker {
     public:
-        DiffAsyncWorker(Nan::Callback* callback,
+        DiffAsyncWorker(Napi::Function& callback,
                         const uint8_t* oldData, size_t oldLen,
                         const uint8_t* newData, size_t newLen)
-            : Nan::AsyncWorker(callback), result_(new std::vector<uint8_t>()) {
+            : Napi::AsyncWorker(callback) {
             // 复制数据到工作线程（因为原始 Buffer 可能在 JS 中被 GC）
             oldData_.assign(oldData, oldData + oldLen);
             newData_.assign(newData, newData + newLen);
@@ -57,46 +45,43 @@ namespace hdiffpatchNode
         void Execute() override {
             try {
                 hdiff(oldData_.data(), oldData_.size(),
-                      newData_.data(), newData_.size(), *result_);
+                      newData_.data(), newData_.size(), result_);
             } catch (const std::exception& e) {
-                SetErrorMessage(e.what());
+                SetError(e.what());
             }
         }
 
-        void HandleOKCallback() override {
-            Nan::HandleScope scope;
-            // 零拷贝返回
-            Local<Object> resultBuf = Nan::NewBuffer(
-                (char*)result_->data(),
-                result_->size(),
-                vectorDeleter,
-                result_
-            ).ToLocalChecked();
-            result_ = nullptr; // 所有权已转移
-            Local<Value> argv[] = { Nan::Null(), resultBuf };
-            callback->Call(2, argv, async_resource);
+        void OnOK() override {
+            Napi::Env env = Env();
+            Napi::HandleScope scope(env);
+            
+            // 创建 Buffer 并复制数据
+            Napi::Buffer<uint8_t> resultBuf = Napi::Buffer<uint8_t>::Copy(
+                env, result_.data(), result_.size()
+            );
+            
+            Callback().Call({env.Null(), resultBuf});
         }
 
-        void HandleErrorCallback() override {
-            Nan::HandleScope scope;
-            delete result_;
-            Local<Value> argv[] = { Nan::Error(ErrorMessage()) };
-            callback->Call(1, argv, async_resource);
+        void OnError(const Napi::Error& e) override {
+            Napi::Env env = Env();
+            Napi::HandleScope scope(env);
+            Callback().Call({e.Value()});
         }
 
     private:
         std::vector<uint8_t> oldData_;
         std::vector<uint8_t> newData_;
-        std::vector<uint8_t>* result_;
+        std::vector<uint8_t> result_;
     };
 
     // ============ 异步 Patch Worker ============
-    class PatchAsyncWorker : public Nan::AsyncWorker {
+    class PatchAsyncWorker : public Napi::AsyncWorker {
     public:
-        PatchAsyncWorker(Nan::Callback* callback,
+        PatchAsyncWorker(Napi::Function& callback,
                          const uint8_t* oldData, size_t oldLen,
                          const uint8_t* diffData, size_t diffLen)
-            : Nan::AsyncWorker(callback), result_(new std::vector<uint8_t>()) {
+            : Napi::AsyncWorker(callback) {
             oldData_.assign(oldData, oldData + oldLen);
             diffData_.assign(diffData, diffData + diffLen);
         }
@@ -104,136 +89,125 @@ namespace hdiffpatchNode
         void Execute() override {
             try {
                 hpatch(oldData_.data(), oldData_.size(),
-                       diffData_.data(), diffData_.size(), *result_);
+                       diffData_.data(), diffData_.size(), result_);
             } catch (const std::exception& e) {
-                SetErrorMessage(e.what());
+                SetError(e.what());
             }
         }
 
-        void HandleOKCallback() override {
-            Nan::HandleScope scope;
-            Local<Object> resultBuf = Nan::NewBuffer(
-                (char*)result_->data(),
-                result_->size(),
-                vectorDeleter,
-                result_
-            ).ToLocalChecked();
-            result_ = nullptr;
-            Local<Value> argv[] = { Nan::Null(), resultBuf };
-            callback->Call(2, argv, async_resource);
+        void OnOK() override {
+            Napi::Env env = Env();
+            Napi::HandleScope scope(env);
+            
+            Napi::Buffer<uint8_t> resultBuf = Napi::Buffer<uint8_t>::Copy(
+                env, result_.data(), result_.size()
+            );
+            
+            Callback().Call({env.Null(), resultBuf});
         }
 
-        void HandleErrorCallback() override {
-            Nan::HandleScope scope;
-            delete result_;
-            Local<Value> argv[] = { Nan::Error(ErrorMessage()) };
-            callback->Call(1, argv, async_resource);
+        void OnError(const Napi::Error& e) override {
+            Napi::Env env = Env();
+            Napi::HandleScope scope(env);
+            Callback().Call({e.Value()});
         }
 
     private:
         std::vector<uint8_t> oldData_;
         std::vector<uint8_t> diffData_;
-        std::vector<uint8_t>* result_;
+        std::vector<uint8_t> result_;
     };
 
-    // ============ 同步 diff ============
-    void diff(const FunctionCallbackInfo<Value>& args) {
-        Isolate* isolate = args.GetIsolate();
-        HandleScope scope(isolate);
+    // ============ 同步/异步 diff ============
+    Napi::Value diff(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
 
         const uint8_t* oldData = nullptr;
         size_t oldLength = 0;
         const uint8_t* newData = nullptr;
         size_t newLength = 0;
 
-        if (!getBufferData(args[0], &oldData, &oldLength) ||
-            !getBufferData(args[1], &newData, &newLength)) {
-            Nan::ThrowTypeError("Invalid arguments: expected Buffer or TypedArray.");
-            return;
+        if (info.Length() < 2 ||
+            !getBufferData(info[0], &oldData, &oldLength) ||
+            !getBufferData(info[1], &newData, &newLength)) {
+            Napi::TypeError::New(env, "Invalid arguments: expected Buffer or TypedArray.")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
         // 如果提供了回调函数，使用异步模式
-        if (args.Length() > 2 && args[2]->IsFunction()) {
-            Nan::Callback* callback = new Nan::Callback(args[2].As<v8::Function>());
-            Nan::AsyncQueueWorker(new DiffAsyncWorker(callback, oldData, oldLength, newData, newLength));
-            return;
+        if (info.Length() > 2 && info[2].IsFunction()) {
+            Napi::Function callback = info[2].As<Napi::Function>();
+            DiffAsyncWorker* worker = new DiffAsyncWorker(
+                callback, oldData, oldLength, newData, newLength
+            );
+            worker->Queue();
+            return env.Undefined();
         }
 
         // 同步模式
-        std::vector<uint8_t>* codeBuf = new std::vector<uint8_t>();
+        std::vector<uint8_t> codeBuf;
         try {
-            hdiff(oldData, oldLength, newData, newLength, *codeBuf);
+            hdiff(oldData, oldLength, newData, newLength, codeBuf);
         } catch (const std::exception& e) {
-            delete codeBuf;
-            Nan::ThrowError(e.what());
-            return;
+            Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
-        Local<Object> result = Nan::NewBuffer(
-            (char*)codeBuf->data(),
-            codeBuf->size(),
-            vectorDeleter,
-            codeBuf
-        ).ToLocalChecked();
-        args.GetReturnValue().Set(result);
+        return Napi::Buffer<uint8_t>::Copy(env, codeBuf.data(), codeBuf.size());
     }
 
-    // ============ 同步 patch ============
-    void patch(const FunctionCallbackInfo<Value>& args) {
-        Isolate* isolate = args.GetIsolate();
-        HandleScope scope(isolate);
+    // ============ 同步/异步 patch ============
+    Napi::Value patch(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
 
         const uint8_t* oldData = nullptr;
         size_t oldLength = 0;
         const uint8_t* diffData = nullptr;
         size_t diffLength = 0;
 
-        if (!getBufferData(args[0], &oldData, &oldLength) ||
-            !getBufferData(args[1], &diffData, &diffLength)) {
-            Nan::ThrowTypeError("Invalid arguments: expected Buffer or TypedArray (old, diff).");
-            return;
+        if (info.Length() < 2 ||
+            !getBufferData(info[0], &oldData, &oldLength) ||
+            !getBufferData(info[1], &diffData, &diffLength)) {
+            Napi::TypeError::New(env, "Invalid arguments: expected Buffer or TypedArray (old, diff).")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
         if (diffLength < 4) {
-            Nan::ThrowError("Invalid diff data: too short.");
-            return;
+            Napi::Error::New(env, "Invalid diff data: too short.")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
         // 如果提供了回调函数，使用异步模式
-        if (args.Length() > 2 && args[2]->IsFunction()) {
-            Nan::Callback* callback = new Nan::Callback(args[2].As<v8::Function>());
-            Nan::AsyncQueueWorker(new PatchAsyncWorker(callback, oldData, oldLength, diffData, diffLength));
-            return;
+        if (info.Length() > 2 && info[2].IsFunction()) {
+            Napi::Function callback = info[2].As<Napi::Function>();
+            PatchAsyncWorker* worker = new PatchAsyncWorker(
+                callback, oldData, oldLength, diffData, diffLength
+            );
+            worker->Queue();
+            return env.Undefined();
         }
 
         // 同步模式
-        std::vector<uint8_t>* newBuf = new std::vector<uint8_t>();
+        std::vector<uint8_t> newBuf;
         try {
-            hpatch(oldData, oldLength, diffData, diffLength, *newBuf);
+            hpatch(oldData, oldLength, diffData, diffLength, newBuf);
         } catch (const std::exception& e) {
-            delete newBuf;
-            Nan::ThrowError(e.what());
-            return;
+            Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
-        Local<Object> result = Nan::NewBuffer(
-            (char*)newBuf->data(),
-            newBuf->size(),
-            vectorDeleter,
-            newBuf
-        ).ToLocalChecked();
-        args.GetReturnValue().Set(result);
+        return Napi::Buffer<uint8_t>::Copy(env, newBuf.data(), newBuf.size());
     }
 
-    void init(Local<Object> exports)
-    {
-        Isolate* isolate = exports->GetIsolate();
-        HandleScope scope(isolate);
-
-        NODE_SET_METHOD(exports, "diff", diff);
-        NODE_SET_METHOD(exports, "patch", patch);
+    Napi::Object Init(Napi::Env env, Napi::Object exports) {
+        exports.Set(Napi::String::New(env, "diff"), Napi::Function::New(env, diff));
+        exports.Set(Napi::String::New(env, "patch"), Napi::Function::New(env, patch));
+        return exports;
     }
 
-    NODE_MODULE(hdiffpatch, init)
+    NODE_API_MODULE(hdiffpatch, Init)
 
 } // namespace hdiffpatch
