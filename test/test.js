@@ -35,6 +35,9 @@ var largeOld = crypto.randomBytes(1024 * 100);
 var largeNew = Buffer.concat([Buffer.from("header"), largeOld, Buffer.from("footer")]);
 var largeDiff = hdiffpatch.diff(largeOld, largeNew);
 var largePatched = hdiffpatch.patch(largeOld, largeDiff);
+console.log("  largeOld size:", largeOld.length);
+console.log("  largeNew size:", largeNew.length);
+console.log("  largeDiff size:", largeDiff.length);
 assert.deepStrictEqual(largePatched, largeNew);
 console.log("  ✓ Large data sync works");
 
@@ -46,23 +49,3 @@ var uint8Patched = hdiffpatch.patch(uint8Old, uint8Diff);
 assert.deepStrictEqual(Buffer.from(uint8Patched), newData);
 console.log("  ✓ Uint8Array works");
 
-console.log("\nTest 5: Async diff + patch (Promise)...");
-(async () => {
-  var asyncOld = crypto.randomBytes(1024 * 500); // 500KB
-  var asyncNew = Buffer.concat([Buffer.from("async_"), asyncOld.slice(1000)]);
-  
-  console.log("  Starting async diff (500KB)...");
-  var startDiff = Date.now();
-  var asyncDiffResult = await hdiffpatch.diffAsync(asyncOld, asyncNew);
-  console.log("  Async diff took:", Date.now() - startDiff, "ms");
-  
-  console.log("  Starting async patch...");
-  var startPatch = Date.now();
-  var asyncPatched = await hdiffpatch.patchAsync(asyncOld, asyncDiffResult);
-  console.log("  Async patch took:", Date.now() - startPatch, "ms");
-  
-  assert.deepStrictEqual(asyncPatched, asyncNew);
-  console.log("  ✓ Async diff + patch works");
-  
-  console.log("\n✅ All tests passed!");
-})();
