@@ -1,9 +1,5 @@
-var native;
-try {
-  native = require('./build/Release/hdiffpatch');
-} catch(e) {
-  console.error(e);
-}
+const native = require('./build/Release/hdiffpatch');
+
 exports.native = native;
 
 // 同步版本
