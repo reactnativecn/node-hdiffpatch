@@ -1,6 +1,6 @@
 {
   "name": "node-hdiffpatch",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "description": "hdiffpatch port to node.js",
   "main": "index.js",
   "scripts": {
@@ -13,9 +13,6 @@
   "license": "MIT",
   "dependencies": {
     "node-addon-api": "^8.5.0"
-  },
-  "devDependencies": {
-    "md5": "^2.3.0"
   },
   "repository": {
     "type": "git",
