@@ -26,3 +26,12 @@ The diff format is the streaming compressed format; use `patchStream` to apply i
 
 Apply diff file to old file and write new file by streaming. In sync mode
 returns `outNewPath`. In async mode, callback signature is `(err, outNewPath)`.
+
+## CLI
+
+After install, you can run:
+
+```bash
+hdp diff <oldFile> <newFile> <outDiff>
+hdp patch <oldFile> <diffFile> <outNew>
+```
