@@ -1,6 +1,9 @@
 var hdiffpatch = require("../index");
 var crypto = require("crypto");
 var assert = require("assert").strict;
+var fs = require("fs");
+var path = require("path");
+var os = require("os");
 
 console.log("Test 1: diff + patch = original (sync)...");
 var oldData = crypto.randomBytes(40960);
@@ -49,3 +52,23 @@ var uint8Patched = hdiffpatch.patch(uint8Old, uint8Diff);
 assert.deepStrictEqual(Buffer.from(uint8Patched), newData);
 console.log("  ✓ Uint8Array works");
 
+console.log("\nTest 5: Stream diff/patch (file paths)...");
+var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hdiffpatch-"));
+var oldPath = path.join(tempDir, "old.bin");
+var newPath = path.join(tempDir, "new.bin");
+var diffPath = path.join(tempDir, "diff.bin");
+var outNewPath = path.join(tempDir, "out.bin");
+
+fs.writeFileSync(oldPath, oldData);
+fs.writeFileSync(newPath, newData);
+
+var diffOutPath = hdiffpatch.diffStream(oldPath, newPath, diffPath);
+assert.strictEqual(diffOutPath, diffPath);
+var patchedOutPath = hdiffpatch.patchStream(oldPath, diffPath, outNewPath);
+assert.strictEqual(patchedOutPath, outNewPath);
+
+var outNewData = fs.readFileSync(outNewPath);
+assert.deepStrictEqual(outNewData, newData);
+console.log("  ✓ Stream diff/patch works");
+
+fs.rmSync(tempDir, { recursive: true, force: true });

@@ -10,5 +10,6 @@
 
 void hdiff(const uint8_t* old,size_t oldsize,const uint8_t* _new,size_t newsize,
 		   std::vector<uint8_t>& out_codeBuf);
+void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPath);
 
 #endif

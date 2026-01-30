@@ -12,5 +12,6 @@
 void hpatch(const uint8_t* old, size_t oldsize,
             const uint8_t* diff, size_t diffsize,
             std::vector<uint8_t>& out_newBuf);
+void hpatch_stream(const char* oldPath,const char* diffPath,const char* outNewPath);
 
 #endif

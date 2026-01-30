@@ -4,6 +4,7 @@
  */
 #include "hpatch.h"
 #include "../HDiffPatch/libHDiffPatch/HPatch/patch.h"
+#include "../HDiffPatch/file_for_patch.h"
 #include <stdexcept>
 
 #define _CompressPlugin_lzma2
@@ -74,5 +75,70 @@ void hpatch(const uint8_t* old, size_t oldsize,
                                     old, old + oldsize,
                                     diff, diff + diffsize)) {
         throw std::runtime_error("patch_single_stream_by_mem() failed!");
+    }
+}
+
+void hpatch_stream(const char* oldPath,const char* diffPath,const char* outNewPath){
+    if (!oldPath || !diffPath || !outNewPath) {
+        throw std::runtime_error("Invalid file path.");
+    }
+
+    hpatch_TDecompress* decompressPlugin = &lzma2DecompressPlugin;
+
+    hpatch_TFileStreamInput oldStream;
+    hpatch_TFileStreamInput diffStream;
+    hpatch_TFileStreamOutput newStream;
+    hpatch_TFileStreamInput_init(&oldStream);
+    hpatch_TFileStreamInput_init(&diffStream);
+    hpatch_TFileStreamOutput_init(&newStream);
+
+    bool oldOpened = false;
+    bool diffOpened = false;
+    bool newOpened = false;
+
+    try {
+        if (!hpatch_TFileStreamInput_open(&oldStream, oldPath)) {
+            throw std::runtime_error("open old file failed.");
+        }
+        oldOpened = true;
+        if (!hpatch_TFileStreamInput_open(&diffStream, diffPath)) {
+            throw std::runtime_error("open diff file failed.");
+        }
+        diffOpened = true;
+
+        hpatch_compressedDiffInfo diffInfo;
+        if (!getCompressedDiffInfo(&diffInfo, &diffStream.base)) {
+            throw std::runtime_error("getCompressedDiffInfo() failed, invalid diff data!");
+        }
+        if (diffInfo.oldDataSize != oldStream.base.streamSize) {
+            throw std::runtime_error("Old data size mismatch!");
+        }
+        if (decompressPlugin && !decompressPlugin->is_can_open(diffInfo.compressType)) {
+            throw std::runtime_error("Unsupported diff compress type.");
+        }
+
+        if (!hpatch_TFileStreamOutput_open(&newStream, outNewPath, diffInfo.newDataSize)) {
+            throw std::runtime_error("open new file for write failed.");
+        }
+        newOpened = true;
+
+        if (!patch_decompress(&newStream.base, &oldStream.base, &diffStream.base, decompressPlugin)) {
+            throw std::runtime_error("patch_decompress() failed!");
+        }
+    } catch (...) {
+        if (newOpened) hpatch_TFileStreamOutput_close(&newStream);
+        if (diffOpened) hpatch_TFileStreamInput_close(&diffStream);
+        if (oldOpened) hpatch_TFileStreamInput_close(&oldStream);
+        throw;
+    }
+
+    if (newOpened && !hpatch_TFileStreamOutput_close(&newStream)) {
+        throw std::runtime_error("close new file failed.");
+    }
+    if (diffOpened && !hpatch_TFileStreamInput_close(&diffStream)) {
+        throw std::runtime_error("close diff file failed.");
+    }
+    if (oldOpened && !hpatch_TFileStreamInput_close(&oldStream)) {
+        throw std::runtime_error("close old file failed.");
     }
 }
