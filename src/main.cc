@@ -6,6 +6,7 @@
 #include <napi.h>
 #include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 #include "hdiff.h"
 #include "hpatch.h"
@@ -36,6 +37,22 @@ namespace hdiffpatchNode
         return true;
     }
 
+    inline Napi::Buffer<uint8_t> bufferFromVector(Napi::Env env, std::vector<uint8_t>&& data) {
+        if (data.empty()) {
+            return Napi::Buffer<uint8_t>::New(env, 0);
+        }
+        auto* vec = new std::vector<uint8_t>(std::move(data));
+        return Napi::Buffer<uint8_t>::New(
+            env,
+            vec->data(),
+            vec->size(),
+            [](Napi::Env /*env*/, uint8_t* /*data*/, std::vector<uint8_t>* vecPtr) {
+                delete vecPtr;
+            },
+            vec
+        );
+    }
+
     // ============ 异步 Diff Worker ============
     class DiffAsyncWorker : public Napi::AsyncWorker {
     public:
@@ -63,12 +80,7 @@ namespace hdiffpatchNode
         void OnOK() override {
             Napi::Env env = Env();
             Napi::HandleScope scope(env);
-            
-            // 创建 Buffer 并复制数据
-            Napi::Buffer<uint8_t> resultBuf = Napi::Buffer<uint8_t>::Copy(
-                env, result_.data(), result_.size()
-            );
-            
+            Napi::Buffer<uint8_t> resultBuf = bufferFromVector(env, std::move(result_));
             Callback().Call({env.Null(), resultBuf});
             oldRef_.Reset();
             newRef_.Reset();
@@ -119,11 +131,7 @@ namespace hdiffpatchNode
         void OnOK() override {
             Napi::Env env = Env();
             Napi::HandleScope scope(env);
-            
-            Napi::Buffer<uint8_t> resultBuf = Napi::Buffer<uint8_t>::Copy(
-                env, result_.data(), result_.size()
-            );
-            
+            Napi::Buffer<uint8_t> resultBuf = bufferFromVector(env, std::move(result_));
             Callback().Call({env.Null(), resultBuf});
             oldRef_.Reset();
             diffRef_.Reset();
@@ -261,7 +269,7 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
-        return Napi::Buffer<uint8_t>::Copy(env, codeBuf.data(), codeBuf.size());
+        return bufferFromVector(env, std::move(codeBuf));
     }
 
     // ============ 同步/异步 patch ============
@@ -306,7 +314,7 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
-        return Napi::Buffer<uint8_t>::Copy(env, newBuf.data(), newBuf.size());
+        return bufferFromVector(env, std::move(newBuf));
     }
 
     // ============ 同步/异步 diffStream ============
