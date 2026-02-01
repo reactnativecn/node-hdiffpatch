@@ -59,20 +59,21 @@ jobs:
           bun-version: latest
       - uses: actions/download-artifact@v7
         with:
-          path: .
-          merge-multiple: true
+          path: artifacts
           pattern: prebuilds-*
-      - name: Ensure prebuilds present
+      - name: Merge prebuilds
         run: |
-          if [ ! -d prebuilds ]; then
-            echo "prebuilds/ not found, merging artifact directories..."
-            mkdir -p prebuilds
-            for dir in prebuilds-*; do
-              if [ -d "$dir/prebuilds" ]; then
-                cp -R "$dir/prebuilds/." prebuilds/
-              fi
-            done
-          fi
+          shopt -s nullglob
+          mkdir -p prebuilds
+          echo "Downloaded artifacts:"
+          ls -R artifacts
+          for dir in artifacts/prebuilds-*; do
+            if [ -d "$dir/prebuilds" ]; then
+              cp -R "$dir/prebuilds/." prebuilds/
+            else
+              cp -R "$dir/." prebuilds/
+            fi
+          done
           if ! find prebuilds -name "*.node" | grep -q .; then
             echo "No prebuilds found after download."
             exit 1
