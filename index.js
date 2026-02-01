@@ -12,11 +12,7 @@ function loadNative() {
     return require('./prebuilds/linux-arm64/node-hdiffpatch.node');
   }
 
-  const combo = `${platform}-${arch}`;
-  throw new Error(
-    `Unsupported platform/arch: ${combo}. ` +
-      'No prebuilt binary is available for this platform.'
-  );
+  return require('node-gyp-build')(__dirname);
 }
 
 const native = loadNative();
