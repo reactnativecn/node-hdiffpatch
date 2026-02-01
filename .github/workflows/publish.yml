@@ -17,12 +17,12 @@ jobs:
             arch: x64
           - os: ubuntu-24.04-arm
             arch: arm64
-          - os: macos-15-intel
-            arch: x64
+          # - os: macos-15-intel
+          #   arch: x64
           - os: macos-latest
             arch: arm64
-          - os: windows-latest
-            arch: x64
+          # - os: windows-latest
+          #   arch: x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -34,7 +34,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun install
+      - run: bun install --ignore-scripts
       - run: bun run prebuild
       - uses: actions/upload-artifact@v6
         with:
