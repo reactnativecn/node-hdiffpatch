@@ -11,7 +11,6 @@
     "prepublishOnly": "bun scripts/prepublish.ts",
     "benchmark": "node --expose-gc test/benchmark.js",
     "prebuild": "prebuildify --napi --strip",
-    "install": "node-gyp-build",
     "prepack": "git submodule update --init --recursive"
   },
   "gypfile": true,
@@ -35,5 +34,8 @@
   "bugs": {
     "url": "https://github.com/reactnativecn/node-hdiffpatch/issues"
   },
-  "homepage": "https://github.com/reactnativecn/node-hdiffpatch#readme"
+  "homepage": "https://github.com/reactnativecn/node-hdiffpatch#readme",
+  "trustedDependencies": [
+    "node-gyp"
+  ]
 }
