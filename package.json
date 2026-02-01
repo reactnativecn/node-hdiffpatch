@@ -6,13 +6,17 @@
   "bin": {
     "hdp": "bin/hdiffpatch.js"
   },
+  "files": [
+    "index.js",
+    "bin/",
+    "prebuilds/"
+  ],
   "scripts": {
     "test": "node test/test.js",
     "prepublishOnly": "bun scripts/prepublish.ts",
     "benchmark": "node --expose-gc test/benchmark.js",
     "prebuild": "prebuildify --napi --strip",
-    "install": "node-gyp-build",
-    "prepack": "git submodule update --init --recursive"
+    "install": "node-gyp-build"
   },
   "gypfile": true,
   "author": "housisong, sunnylqm",
