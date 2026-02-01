@@ -8,14 +8,21 @@
   },
   "scripts": {
     "test": "node test/test.js",
+    "prepublishOnly": "bun scripts/prepublish.ts",
     "benchmark": "node --expose-gc test/benchmark.js",
+    "prebuild": "prebuildify --napi --strip",
+    "install": "node-gyp-build",
     "prepack": "git submodule update --init --recursive"
   },
   "gypfile": true,
   "author": "housisong, sunnylqm",
   "license": "MIT",
   "dependencies": {
-    "node-addon-api": "^8.5.0"
+    "node-addon-api": "^8.5.0",
+    "node-gyp-build": "^4.8.1"
+  },
+  "devDependencies": {
+    "prebuildify": "^6.0.0"
   },
   "repository": {
     "type": "git",

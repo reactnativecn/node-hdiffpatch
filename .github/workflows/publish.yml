@@ -1,0 +1,66 @@
+name: Publish Package to npmjs
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
+  
+jobs:
+  prebuilds:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+          - os: macos-latest
+            arch: arm64
+          - os: windows-latest
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run prebuild
+      - uses: actions/upload-artifact@v6
+        with:
+          name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
+          path: prebuilds
+
+  publish:
+    needs: prebuilds
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/download-artifact@v7
+        with:
+          path: .
+          merge-multiple: true
+      - run: bun scripts/prepublish.ts
+      - run: bun publish --access public --tag latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -7,7 +7,15 @@ Patch compatible with HDiffPatch -SD
 ## Installation
 
 ```bash
-npm install --save node-hdiffpatch
+bun add node-hdiffpatch
+```
+
+## Prebuilds
+
+Prebuilds are generated per target platform/arch. Build them on each target OS:
+
+```bash
+bun run prebuild
 ```
 
 ## Usage

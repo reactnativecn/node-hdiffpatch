@@ -1,4 +1,4 @@
-const native = require('./build/Release/hdiffpatch');
+const native = require('node-gyp-build')(__dirname);
 
 exports.native = native;
 
