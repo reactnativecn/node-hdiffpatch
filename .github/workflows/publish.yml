@@ -59,24 +59,7 @@ jobs:
           bun-version: latest
       - uses: actions/download-artifact@v7
         with:
-          path: artifacts
-          pattern: prebuilds-*
-      - name: Merge prebuilds
-        run: |
-          shopt -s nullglob
-          mkdir -p prebuilds
-          echo "Downloaded artifacts:"
-          ls -R artifacts
-          for dir in artifacts/prebuilds-*; do
-            if [ -d "$dir/prebuilds" ]; then
-              cp -R "$dir/prebuilds/." prebuilds/
-            else
-              cp -R "$dir/." prebuilds/
-            fi
-          done
-          if ! find prebuilds -name "*.node" | grep -q .; then
-            echo "No prebuilds found after download."
-            exit 1
-          fi
+          path: prebuilds
+          merge-multiple: true
       - run: bun scripts/prepublish.ts
-      - run: bun publish --access public --tag latest
+      - run: npm publish --access public --tag latest
