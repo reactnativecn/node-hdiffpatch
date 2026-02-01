@@ -2,6 +2,7 @@
 
 import { access, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { $ } from 'bun';
 
 async function modifyPackageJson({
   version,
