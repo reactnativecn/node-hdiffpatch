@@ -3,11 +3,13 @@
   "version": "1.1.2",
   "description": "hdiffpatch port to node.js",
   "main": "index.js",
+  "types": "index.d.ts",
   "bin": {
     "hdp": "bin/hdiffpatch.js"
   },
   "files": [
     "index.js",
+    "index.d.ts",
     "bin/",
     "prebuilds/"
   ],
