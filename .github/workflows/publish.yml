@@ -40,6 +40,7 @@ jobs:
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
           path: prebuilds
+          if-no-files-found: error
 
   publish:
     needs: prebuilds
@@ -60,7 +61,21 @@ jobs:
         with:
           path: .
           merge-multiple: true
+          pattern: prebuilds-*
+      - name: Ensure prebuilds present
+        run: |
+          if [ ! -d prebuilds ]; then
+            echo "prebuilds/ not found, merging artifact directories..."
+            mkdir -p prebuilds
+            for dir in prebuilds-*; do
+              if [ -d "$dir/prebuilds" ]; then
+                cp -R "$dir/prebuilds/." prebuilds/
+              fi
+            done
+          fi
+          if ! find prebuilds -name "*.node" | grep -q .; then
+            echo "No prebuilds found after download."
+            exit 1
+          fi
       - run: bun scripts/prepublish.ts
       - run: bun publish --access public --tag latest
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
