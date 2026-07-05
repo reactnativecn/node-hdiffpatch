@@ -27,6 +27,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      # bun 在 Windows 上生成 exe shim,而 prebuildify 硬编码 spawn node-gyp.cmd
+      - if: runner.os == 'Windows'
+        run: npm install -g node-gyp
       - run: bun install --ignore-scripts
       - run: bun run prebuild
       - run: node test/test.js

@@ -104,6 +104,12 @@ assert.throws(
   () => hdiffpatch.diffWithCovers(coverOld, coverNew, [], { mode: "invalid" }),
   /Invalid options.mode/
 );
+assert.throws(
+  () => hdiffpatch.diffWithCovers(coverOld, coverNew, [
+    { oldPos: "-1", newPos: "0", len: "1" },
+  ]),
+  /Invalid cover/
+);
 console.log("  ✓ diffWithCovers patch(old, diff) === new");
 
 console.log("\nTest 6: Single-compressed patchSingleStream (file paths)...");

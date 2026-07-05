@@ -109,9 +109,9 @@ hdp diff <oldFile> <newFile> <outDiff>
 hdp patch <oldFile> <diffFile> <outNew>
 ```
 
-Note: `hdp patch` applies diffs created by `hdp diff` (streaming format). Diffs
-created by the in-memory `diff()` / `diffWithCovers()` APIs must be applied with
-`patch()` or `patchSingleStream()` instead.
+Note: `hdp patch` auto-detects the diff format by its header, so it can apply
+both streaming diffs created by `hdp diff` and single-compressed diffs created
+by the in-memory `diff()` / `diffWithCovers()` APIs.
 
 ## License
 

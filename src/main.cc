@@ -42,6 +42,8 @@ namespace hdiffpatchNode
 
     inline bool parseUint64String(const std::string& value, uint64_t* out) {
         if (value.empty()) return false;
+        // strtoull 会接受前导 '-' 并做二补回绕("-1" → UINT64_MAX),显式拒绝
+        if (value.find('-') != std::string::npos) return false;
         errno = 0;
         char* end = nullptr;
         unsigned long long parsed = std::strtoull(value.c_str(), &end, 10);
