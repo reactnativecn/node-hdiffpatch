@@ -36,8 +36,8 @@ async function modifyPackageJson({
 
 async function main(): Promise<void> {
   const version = (await $`git describe --tags --always`.text())
-    .replace('v', '')
-    .trim();
+    .trim()
+    .replace(/^v/, '');
   try {
     await modifyPackageJson({ version });
     console.log('✅ Prepublish script completed successfully');

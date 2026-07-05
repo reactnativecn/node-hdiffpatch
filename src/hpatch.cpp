@@ -5,6 +5,7 @@
 #include "hpatch.h"
 #include "../HDiffPatch/libHDiffPatch/HPatch/patch.h"
 #include "../HDiffPatch/file_for_patch.h"
+#include <limits>
 #include <stdexcept>
 
 #define _CompressPlugin_lzma2
@@ -25,7 +26,14 @@ static hpatch_BOOL onDiffInfo(sspatch_listener_t* listener,
                               unsigned char** out_temp_cache,
                               unsigned char** out_temp_cacheEnd) {
     PatchListener* self = (PatchListener*)listener->import;
-    
+
+    // stepMemSize 来自 diff 数据,拒绝超出 size_t 可表示范围的声明值
+    const hpatch_StreamPos_t maxCacheSize =
+        (hpatch_StreamPos_t)(std::numeric_limits<size_t>::max() - hpatch_kStreamCacheSize * 4);
+    if (info->stepMemSize > maxCacheSize) {
+        return hpatch_FALSE;
+    }
+
     // Allocate temp cache: stepMemSize + I/O cache
     size_t cacheSize = (size_t)info->stepMemSize + hpatch_kStreamCacheSize * 4;
     self->tempCache->resize(cacheSize);
@@ -51,7 +59,13 @@ void hpatch(const uint8_t* old, size_t oldsize,
     if (diffInfo.oldDataSize != oldsize) {
         throw std::runtime_error("Old data size mismatch!");
     }
-    
+
+    // newDataSize 来自 diff 数据,防止 uint64 → size_t 截断(32 位平台)
+    if (diffInfo.newDataSize >
+        (hpatch_StreamPos_t)std::numeric_limits<size_t>::max()) {
+        throw std::runtime_error("Invalid diff data: declared new size is too large!");
+    }
+
     // Allocate output buffer
     out_newBuf.resize((size_t)diffInfo.newDataSize);
     
@@ -75,6 +89,69 @@ void hpatch(const uint8_t* old, size_t oldsize,
                                     old, old + oldsize,
                                     diff, diff + diffsize)) {
         throw std::runtime_error("patch_single_stream_by_mem() failed!");
+    }
+}
+
+void hpatch_single_stream(const char* oldPath,const char* diffPath,const char* outNewPath){
+    if (!oldPath || !diffPath || !outNewPath) {
+        throw std::runtime_error("Invalid file path.");
+    }
+
+    hpatch_TDecompress* decompressPlugin = &lzma2DecompressPlugin;
+
+    hpatch_TFileStreamInput oldStream;
+    hpatch_TFileStreamInput diffStream;
+    hpatch_TFileStreamOutput newStream;
+    hpatch_TFileStreamInput_init(&oldStream);
+    hpatch_TFileStreamInput_init(&diffStream);
+    hpatch_TFileStreamOutput_init(&newStream);
+
+    bool oldOpened = false;
+    bool diffOpened = false;
+    bool newOpened = false;
+
+    try {
+        if (!hpatch_TFileStreamInput_open(&oldStream, oldPath)) {
+            throw std::runtime_error("open old file failed.");
+        }
+        oldOpened = true;
+        if (!hpatch_TFileStreamInput_open(&diffStream, diffPath)) {
+            throw std::runtime_error("open diff file failed.");
+        }
+        diffOpened = true;
+        if (!hpatch_TFileStreamOutput_open(&newStream, outNewPath, ~(hpatch_StreamPos_t)0)) {
+            throw std::runtime_error("open new file for write failed.");
+        }
+        newOpened = true;
+
+        std::vector<uint8_t> tempCache;
+        PatchListener patchListener;
+        patchListener.decompressPlugin = decompressPlugin;
+        patchListener.tempCache = &tempCache;
+
+        sspatch_listener_t listener;
+        listener.import = &patchListener;
+        listener.onDiffInfo = onDiffInfo;
+        listener.onPatchFinish = nullptr;
+
+        if (!patch_single_stream_by(&listener, &newStream.base, &oldStream.base, &diffStream.base, 0)) {
+            throw std::runtime_error("patch_single_stream_by() failed!");
+        }
+    } catch (...) {
+        if (newOpened) hpatch_TFileStreamOutput_close(&newStream);
+        if (diffOpened) hpatch_TFileStreamInput_close(&diffStream);
+        if (oldOpened) hpatch_TFileStreamInput_close(&oldStream);
+        throw;
+    }
+
+    if (newOpened && !hpatch_TFileStreamOutput_close(&newStream)) {
+        throw std::runtime_error("close new file failed.");
+    }
+    if (diffOpened && !hpatch_TFileStreamInput_close(&diffStream)) {
+        throw std::runtime_error("close diff file failed.");
+    }
+    if (oldOpened && !hpatch_TFileStreamInput_close(&oldStream)) {
+        throw std::runtime_error("close old file failed.");
     }
 }
 
