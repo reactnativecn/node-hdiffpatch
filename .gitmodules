@@ -1,6 +1,6 @@
 [submodule "HDiffPatch"]
 	path = HDiffPatch
-	url = https://github.com/sisong/HDiffPatch.git
+	url = https://github.com/reactnativecn/HDiffPatch.git
 [submodule "lzma"]
 	path = lzma
 	url = https://github.com/sisong/lzma.git
