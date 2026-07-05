@@ -17,12 +17,12 @@ jobs:
             arch: x64
           - os: ubuntu-24.04-arm
             arch: arm64
-          # - os: macos-15-intel
-          #   arch: x64
+          - os: macos-15-intel
+            arch: x64
           - os: macos-latest
             arch: arm64
-          # - os: windows-latest
-          #   arch: x64
+          - os: windows-latest
+            arch: x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -36,7 +36,9 @@ jobs:
           bun-version: latest
       - run: bun install --ignore-scripts
       - run: bun run prebuild
-      - uses: actions/upload-artifact@v6
+      - run: node test/test.js
+      - run: bun ./test/test.js
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
           path: prebuilds
@@ -62,4 +64,4 @@ jobs:
           path: prebuilds
           merge-multiple: true
       - run: bun scripts/prepublish.ts
-      - run: npm publish --access public --tag latest
+      - run: npm publish --access public --tag latest --provenance

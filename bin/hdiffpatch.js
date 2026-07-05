@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('fs');
 const hdiffpatch = require('..');
 
 function usage() {
@@ -12,9 +13,26 @@ function usage() {
       '',
       'Notes:',
       '  - Uses streaming diff/patch for low memory usage.',
+      '  - patch auto-detects the diff format (diffStream or diff/diffWithCovers output).',
       '  - Outputs are files specified by <outDiff>/<outNew>.',
     ].join('\n')
   );
+}
+
+// 两种 diff 格式的文件头:流式为 "HDIFF13",单压缩(diff()/diffWithCovers() 产物)为 "HDIFFSF20"
+function detectDiffFormat(diffFile) {
+  const header = Buffer.alloc(9);
+  const fd = fs.openSync(diffFile, 'r');
+  let bytesRead;
+  try {
+    bytesRead = fs.readSync(fd, header, 0, header.length, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const magic = header.slice(0, bytesRead).toString('latin1');
+  if (magic.startsWith('HDIFFSF20')) return 'single';
+  if (magic.startsWith('HDIFF13')) return 'stream';
+  return null;
 }
 
 function fail(msg) {
@@ -50,7 +68,14 @@ if (cmd === 'patch') {
   const diffFile = args[2];
   const outNew = args[3];
   try {
-    hdiffpatch.patchStream(oldFile, diffFile, outNew);
+    const format = detectDiffFormat(diffFile);
+    if (format === 'single') {
+      hdiffpatch.patchSingleStream(oldFile, diffFile, outNew);
+    } else if (format === 'stream') {
+      hdiffpatch.patchStream(oldFile, diffFile, outNew);
+    } else {
+      throw new Error(`${diffFile} is not a recognized hdiffpatch diff file.`);
+    }
     console.log(outNew);
   } catch (err) {
     fail(err && err.message ? err.message : String(err));
