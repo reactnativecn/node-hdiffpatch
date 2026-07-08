@@ -37,3 +37,4 @@ exports.diffStream = native.diffStream;
 exports.patchStream = native.patchStream;
 exports.diffSingleStream = native.diffSingleStream;
 exports.patchSingleStream = native.patchSingleStream;
+exports.diffWindow = native.diffWindow;

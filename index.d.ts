@@ -38,6 +38,13 @@ export interface NativeAddon {
     outNewPath: string,
     cb: StreamCallback
   ): void;
+  diffWindow(oldPath: string, newPath: string, outDiffPath: string): string;
+  diffWindow(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    cb: StreamCallback
+  ): void;
 }
 
 export const native: NativeAddon;
@@ -102,6 +109,20 @@ export function patchSingleStream(
   cb: StreamCallback
 ): void;
 
+// window 模式生成 HDIFFSF20 single 格式 patch:匹配质量接近内存版
+// diff(),内存占用保持流式档;产物用 patch()/patchSingleStream() 应用
+export function diffWindow(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string
+): string;
+export function diffWindow(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string,
+  cb: StreamCallback
+): void;
+
 declare const hdiffpatch: {
   native: NativeAddon;
   diff: typeof diff;
@@ -110,6 +131,7 @@ declare const hdiffpatch: {
   patchStream: typeof patchStream;
   diffSingleStream: typeof diffSingleStream;
   patchSingleStream: typeof patchSingleStream;
+  diffWindow: typeof diffWindow;
 };
 
 export default hdiffpatch;

@@ -70,6 +70,27 @@ hdiffpatch.patchSingleStream(ssOldPath, ssDiffPath, ssOutPath);
 assert.deepStrictEqual(fs.readFileSync(ssOutPath), newData);
 console.log("  ✓ diffSingleStream output applies via patch() and patchSingleStream()");
 
+console.log("\nTest 5b: diffWindow (single format, window/fast-match generation)...");
+var winDiffPath = path.join(ssDir, "win.diff");
+var winOutPath = path.join(ssDir, "win-out.bin");
+var winDiffOut = hdiffpatch.diffWindow(ssOldPath, ssNewPath, winDiffPath);
+assert.strictEqual(winDiffOut, winDiffPath);
+var winDiffData = fs.readFileSync(winDiffPath);
+// 产物是标准 single 格式(HDIFFSF20 开头),与 diff() 产物同规范
+assert.strictEqual(winDiffData.slice(0, 9).toString("latin1"), "HDIFFSF20");
+assert.deepStrictEqual(hdiffpatch.patch(oldData, winDiffData), newData);
+hdiffpatch.patchSingleStream(ssOldPath, winDiffPath, winOutPath);
+assert.deepStrictEqual(fs.readFileSync(winOutPath), newData);
+// 匹配质量应接近内存版:不应显著差于 diff() 产物(经验上限 1.5x)
+assert(
+  winDiffData.length <= Math.max(diffResult.length * 1.5, diffResult.length + 256),
+  "diffWindow size " + winDiffData.length + " vs diff " + diffResult.length
+);
+console.log(
+  "  ✓ diffWindow output (" + winDiffData.length + "B vs diff " + diffResult.length +
+  "B) applies via patch() and patchSingleStream()"
+);
+
 console.log("\nTest 6: Single-compressed patchSingleStream (file paths)...");
 var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hdiffpatch-"));
 var oldPath = path.join(tempDir, "old.bin");
@@ -109,6 +130,7 @@ var patchAsync = util.promisify(hdiffpatch.patch);
 var diffStreamAsync = util.promisify(hdiffpatch.diffStream);
 var patchStreamAsync = util.promisify(hdiffpatch.patchStream);
 var patchSingleStreamAsync = util.promisify(hdiffpatch.patchSingleStream);
+var diffWindowAsync = util.promisify(hdiffpatch.diffWindow);
 
 async function runAsyncTests() {
   console.log("\nTest 8: Async diff/patch callbacks...");
@@ -140,7 +162,13 @@ async function runAsyncTests() {
   await assert.rejects(
     () => patchStreamAsync(oldPath, path.join(tempDir, "no-such.diff"), asyncOutPath)
   );
-  console.log("  ✓ Async stream diff/patch works");
+  var asyncWinDiffPath = path.join(tempDir, "async-win.diff");
+  assert.strictEqual(await diffWindowAsync(oldPath, newPath, asyncWinDiffPath), asyncWinDiffPath);
+  assert.deepStrictEqual(hdiffpatch.patch(oldData, fs.readFileSync(asyncWinDiffPath)), newData);
+  await assert.rejects(
+    () => diffWindowAsync(path.join(tempDir, "no-such.bin"), newPath, asyncWinDiffPath)
+  );
+  console.log("  ✓ Async stream diff/patch works (incl. diffWindow)");
 
   console.log("\nTest 11: CLI auto-detects both diff formats...");
   var cliBin = path.join(__dirname, "..", "bin", "hdiffpatch.js");

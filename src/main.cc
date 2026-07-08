@@ -466,6 +466,45 @@ namespace hdiffpatchNode
         return Napi::String::New(env, outNewPath);
     }
 
+    // ============ 异步 Window Diff Worker ============
+    class DiffWindowAsyncWorker : public Napi::AsyncWorker {
+    public:
+        DiffWindowAsyncWorker(Napi::Function& callback,
+                              std::string oldPath,
+                              std::string newPath,
+                              std::string outDiffPath)
+            : Napi::AsyncWorker(callback),
+              oldPath_(std::move(oldPath)),
+              newPath_(std::move(newPath)),
+              outDiffPath_(std::move(outDiffPath)) {
+        }
+
+        void Execute() override {
+            try {
+                hdiff_window(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str());
+            } catch (const std::exception& e) {
+                SetError(e.what());
+            }
+        }
+
+        void OnOK() override {
+            Napi::Env env = Env();
+            Napi::HandleScope scope(env);
+            Callback().Call({env.Null(), Napi::String::New(env, outDiffPath_)});
+        }
+
+        void OnError(const Napi::Error& e) override {
+            Napi::Env env = Env();
+            Napi::HandleScope scope(env);
+            Callback().Call({e.Value()});
+        }
+
+    private:
+        std::string oldPath_;
+        std::string newPath_;
+        std::string outDiffPath_;
+    };
+
     // ============ 同步/异步 diffSingleStream ============
     // single 格式(HDIFFSF20)的流式生成:低内存(块匹配),产物与 diff()
     // 同格式,所有既有 single 应用端(含历史客户端)可直接应用。
@@ -495,6 +534,44 @@ namespace hdiffpatchNode
 
         try {
             hdiff_single_stream(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str());
+        } catch (const std::exception& e) {
+            Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        return Napi::String::New(env, outDiffPath);
+    }
+
+    // ============ 同步/异步 diffWindow ============
+    // single 格式(HDIFFSF20)的 window 模式生成:大块流式匹配 + 窗口内
+    // 后缀串精修,匹配质量接近内存版 diff() 而内存占用保持流式档。
+    // 产物与 diff()/diffSingleStream() 同格式,既有应用端可直接应用。
+    Napi::Value diffWindow(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+
+        std::string oldPath;
+        std::string newPath;
+        std::string outDiffPath;
+        if (info.Length() < 3 ||
+            !getStringUtf8(info[0], oldPath) ||
+            !getStringUtf8(info[1], newPath) ||
+            !getStringUtf8(info[2], outDiffPath)) {
+            Napi::TypeError::New(env, "Invalid arguments: expected (oldPath, newPath, outDiffPath).")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        if (info.Length() > 3 && info[3].IsFunction()) {
+            Napi::Function callback = info[3].As<Napi::Function>();
+            DiffWindowAsyncWorker* worker = new DiffWindowAsyncWorker(
+                callback, oldPath, newPath, outDiffPath
+            );
+            worker->Queue();
+            return env.Undefined();
+        }
+
+        try {
+            hdiff_window(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str());
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();
@@ -544,6 +621,7 @@ namespace hdiffpatchNode
         exports.Set(Napi::String::New(env, "diffStream"), Napi::Function::New(env, diffStream));
         exports.Set(Napi::String::New(env, "patchStream"), Napi::Function::New(env, patchStream));
         exports.Set(Napi::String::New(env, "diffSingleStream"), Napi::Function::New(env, diffSingleStream));
+        exports.Set(Napi::String::New(env, "diffWindow"), Napi::Function::New(env, diffWindow));
         exports.Set(Napi::String::New(env, "patchSingleStream"), Napi::Function::New(env, patchSingleStream));
         return exports;
     }

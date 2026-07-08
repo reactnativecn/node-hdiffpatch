@@ -145,6 +145,39 @@ void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPat
     streams.closeAllOrThrow();
 }
 
+void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPath){
+    if (!oldPath || !newPath || !outDiffPath) {
+        throw std::runtime_error("Invalid file path.");
+    }
+
+    hpatch_TDecompress* decompressPlugin = &lzma2DecompressPlugin;
+    TCompressPlugin_lzma2 compressPlugin;
+    configure_lzma2(compressPlugin);
+
+    FileStreamGuard streams;
+    streams.openInputs(oldPath, newPath);
+    streams.openDiffOut(outDiffPath);
+
+    // window 模式:大块流式匹配拿大 cover,再在 old 数据的滑动窗口
+    // (默认 2MB)内做后缀串精修。除 patchStepMemSize/匹配分沿用本库
+    // 固定值外,其余参数取 v5 默认。
+    create_single_compressed_diff_window(&streams.newStream.base, &streams.oldStream.base,
+                                         &streams.diffOutStream.base,
+                                         &compressPlugin.base, kPatchStepMemSize,
+                                         kDefaultWindowOldSize, 0,
+                                         kDefaultBigCoverSize, kMatchWindowsBlockSize_default,
+                                         kDefaultFastMatchBlockSize,
+                                         kSingleMatchScore);
+
+    streams.closeDiffOut();
+    streams.openDiffIn(outDiffPath);
+    if (!check_single_compressed_diff(&streams.newStream.base, &streams.oldStream.base,
+                                      &streams.diffInStream.base, decompressPlugin)) {
+        throw std::runtime_error("check_single_compressed_diff() failed, diff code error!");
+    }
+    streams.closeAllOrThrow();
+}
+
 void hdiff_single_stream(const char* oldPath,const char* newPath,const char* outDiffPath){
     if (!oldPath || !newPath || !outDiffPath) {
         throw std::runtime_error("Invalid file path.");

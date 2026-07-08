@@ -46,6 +46,17 @@ in-memory `diff()` for the same inputs; prefer `diff()` when memory allows.
 In sync mode returns `outDiffPath`; async callback signature is
 `(err, outDiffPath)`.
 
+### diffWindow(oldPath, newPath, outDiffPath[, cb])
+
+Create a **single-format** (same wire format as `diff()`) patch using window
+mode: big covers come from streaming block matching, then residuals are
+refined with suffix-string matching inside a sliding window (2MB) over the old
+data. Match quality is close to the in-memory `diff()` while generation memory
+stays at the streaming tier — usually a much smaller patch than
+`diffSingleStream()` for the same inputs. The output applies with `patch()`,
+`patchSingleStream()`, and any existing single-format apply side. In sync mode
+returns `outDiffPath`; async callback signature is `(err, outDiffPath)`.
+
 ### patchSingleStream(oldPath, diffPath, outNewPath[, cb])
 
 Apply a single-compressed hpatch payload created by `diff` or
