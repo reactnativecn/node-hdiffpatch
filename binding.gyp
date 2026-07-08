@@ -22,6 +22,7 @@
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/window_diff/window_matcher.cpp",
         "HDiffPatch/libHDiffPatch/HPatchLite/hpatch_lite.c",
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/match_inplace.cpp",
+        "lzma/C/CpuArch.c",
         "lzma/C/LzFind.c",
         "lzma/C/LzmaDec.c",
         "lzma/C/LzmaEnc.c",
