@@ -5,6 +5,23 @@ var fs = require("fs");
 var path = require("path");
 var os = require("os");
 
+function deterministicBytes(size, seed) {
+  var out = Buffer.allocUnsafe(size);
+  var x = seed >>> 0;
+  for (var i = 0; i < out.length; ++i) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    out[i] = x & 0xff;
+  }
+  return out;
+}
+
+function assertHeaderPrefix(diffData, prefix) {
+  var expected = Buffer.from(prefix, "latin1");
+  assert.deepStrictEqual(diffData.subarray(0, expected.length), expected);
+}
+
 console.log("Test 1: diff + patch = original (sync)...");
 var oldData = crypto.randomBytes(40960);
 var newData = Buffer.concat([
@@ -52,7 +69,56 @@ var uint8Patched = hdiffpatch.patch(uint8Old, uint8Diff);
 assert.deepStrictEqual(Buffer.from(uint8Patched), newData);
 console.log("  ✓ Uint8Array works");
 
-console.log("\nTest 5: diffSingleStream (single format, low-memory generation)...");
+console.log("\nTest 5: raw single-format diffs clear compressType...");
+var tinyOld = deterministicBytes(280 * 1024, 0x12345678);
+var tinyNew = Buffer.from(tinyOld);
+for (var i = 0; i < 17; ++i) {
+  tinyNew[Math.floor(tinyNew.length / 2) + i] ^= i + 1;
+}
+var tinyDiff = hdiffpatch.diff(tinyOld, tinyNew);
+assertHeaderPrefix(tinyDiff, "HDIFFSF20&\x00");
+assert.deepStrictEqual(hdiffpatch.patch(tinyOld, tinyDiff), tinyNew);
+
+var tinyDir = fs.mkdtempSync(path.join(os.tmpdir(), "hdiffpatch-raw-"));
+var tinyOldPath = path.join(tinyDir, "old.bin");
+var tinyNewPath = path.join(tinyDir, "new.bin");
+fs.writeFileSync(tinyOldPath, tinyOld);
+fs.writeFileSync(tinyNewPath, tinyNew);
+
+function assertRawLabelClearedForFileDiff(diffFn, name) {
+  var tinyDiffPath = path.join(tinyDir, name + ".diff");
+  var tinyOutPath = path.join(tinyDir, name + "-out.bin");
+  diffFn(tinyOldPath, tinyNewPath, tinyDiffPath);
+  var tinyFileDiff = fs.readFileSync(tinyDiffPath);
+  assertHeaderPrefix(tinyFileDiff, "HDIFFSF20&\x00");
+  assert.deepStrictEqual(hdiffpatch.patch(tinyOld, tinyFileDiff), tinyNew);
+  hdiffpatch.patchSingleStream(tinyOldPath, tinyDiffPath, tinyOutPath);
+  assert.deepStrictEqual(fs.readFileSync(tinyOutPath), tinyNew);
+}
+
+assertRawLabelClearedForFileDiff(
+  (oldPath, newPath, diffPath) =>
+    hdiffpatch.diffWindow(oldPath, newPath, diffPath, 8 * 1024 * 1024),
+  "window"
+);
+assertRawLabelClearedForFileDiff(hdiffpatch.diffSingleStream, "single");
+fs.rmSync(tinyDir, { recursive: true, force: true });
+console.log("  ✓ diff(), diffWindow(), and diffSingleStream() clear raw payload labels");
+
+console.log("\nTest 5a: compressed single-format diffs keep compressType...");
+var compressibleOld = deterministicBytes(280 * 1024, 0x9abcdef0);
+var repeated = Buffer.alloc(64 * 1024, "A");
+var compressibleNew = Buffer.concat([
+  compressibleOld.subarray(0, 128 * 1024),
+  repeated,
+  compressibleOld.subarray(128 * 1024)
+]);
+var compressibleDiff = hdiffpatch.diff(compressibleOld, compressibleNew);
+assertHeaderPrefix(compressibleDiff, "HDIFFSF20&lzma2\x00");
+assert.deepStrictEqual(hdiffpatch.patch(compressibleOld, compressibleDiff), compressibleNew);
+console.log("  ✓ lzma2 label remains when compression is used");
+
+console.log("\nTest 5b: diffSingleStream (single format, low-memory generation)...");
 var ssDir = fs.mkdtempSync(path.join(os.tmpdir(), "hdiffpatch-ss-"));
 var ssOldPath = path.join(ssDir, "old.bin");
 var ssNewPath = path.join(ssDir, "new.bin");
@@ -70,7 +136,7 @@ hdiffpatch.patchSingleStream(ssOldPath, ssDiffPath, ssOutPath);
 assert.deepStrictEqual(fs.readFileSync(ssOutPath), newData);
 console.log("  ✓ diffSingleStream output applies via patch() and patchSingleStream()");
 
-console.log("\nTest 5b: diffWindow (single format, window/fast-match generation)...");
+console.log("\nTest 5c: diffWindow (single format, window/fast-match generation)...");
 var winDiffPath = path.join(ssDir, "win.diff");
 var winOutPath = path.join(ssDir, "win-out.bin");
 var winDiffOut = hdiffpatch.diffWindow(ssOldPath, ssNewPath, winDiffPath);

@@ -1,6 +1,8 @@
 #include "hdiff.h"
 #include "../HDiffPatch/libHDiffPatch/HDiff/diff.h"
+#include "../HDiffPatch/libHDiffPatch/HPatch/patch.h"
 #include "../HDiffPatch/file_for_patch.h"
+#include <cstring>
 #include <stdexcept>
 
 #define _CompressPlugin_lzma2
@@ -28,6 +30,8 @@ namespace {
     // 显式固定为旧值,保证与既有版本产出行为连续。
     const int kSingleMatchScore = 3;
     const size_t kPatchStepMemSize = 1024 * 256;
+    const char kSingleDiffPrefix[] = "HDIFFSF20&";
+    const size_t kSingleDiffPrefixSize = sizeof(kSingleDiffPrefix) - 1;
 
     struct FileStreamGuard {
         hpatch_TFileStreamInput oldStream{};
@@ -99,6 +103,155 @@ namespace {
             }
         }
     };
+
+    struct FileRewriteGuard {
+        hpatch_TFileStreamOutput stream{};
+        bool opened = false;
+
+        FileRewriteGuard() {
+            hpatch_TFileStreamOutput_init(&stream);
+        }
+        ~FileRewriteGuard() {
+            if (opened) hpatch_TFileStreamOutput_close(&stream);
+        }
+        void open(const char* path) {
+            if (!hpatch_TFileStreamOutput_reopen(&stream, path, ~(hpatch_StreamPos_t)0)) {
+                throw std::runtime_error("open diff file for rewrite failed.");
+            }
+            opened = true;
+            hpatch_TFileStreamOutput_setRandomOut(&stream, hpatch_TRUE);
+        }
+        void close() {
+            opened = false;
+            if (!hpatch_TFileStreamOutput_close(&stream)) {
+                throw std::runtime_error("close diff file failed.");
+            }
+        }
+    };
+
+    bool should_clear_single_raw_compress_type(const hpatch_singleCompressedDiffInfo& diffInfo,
+                                               size_t* outTypeLen) {
+        if ((diffInfo.compressedSize != 0) || (diffInfo.compressType[0] == '\0')) {
+            return false;
+        }
+        *outTypeLen = std::strlen(diffInfo.compressType);
+        if (*outTypeLen == 0) {
+            return false;
+        }
+        return true;
+    }
+
+    struct SingleRawCompressTypeSplice {
+        bool shouldSplice = false;
+        hpatch_StreamPos_t readPos = 0;
+        hpatch_StreamPos_t writePos = 0;
+        hpatch_StreamPos_t newSize = 0;
+    };
+
+    SingleRawCompressTypeSplice get_single_raw_compress_type_splice(
+            const hpatch_singleCompressedDiffInfo& diffInfo,
+            hpatch_StreamPos_t diffSize,
+            const uint8_t* prefixBytes) {
+        size_t typeLen = 0;
+        if (!should_clear_single_raw_compress_type(diffInfo, &typeLen)) {
+            return {};
+        }
+        if ((diffSize < kSingleDiffPrefixSize + typeLen + 1) ||
+            (0 != std::memcmp(prefixBytes, kSingleDiffPrefix, kSingleDiffPrefixSize))) {
+            throw std::runtime_error("single diff header layout error.");
+        }
+
+        SingleRawCompressTypeSplice splice;
+        splice.shouldSplice = true;
+        splice.readPos = kSingleDiffPrefixSize + typeLen;
+        splice.writePos = kSingleDiffPrefixSize;
+        splice.newSize = diffSize - typeLen;
+        return splice;
+    }
+
+    void normalize_single_raw_compress_type(std::vector<uint8_t>& diff) {
+        hpatch_singleCompressedDiffInfo diffInfo;
+        if (!getSingleCompressedDiffInfo_mem(&diffInfo, diff.data(), diff.data() + diff.size())) {
+            throw std::runtime_error("getSingleCompressedDiffInfo_mem() failed, invalid diff data!");
+        }
+
+        SingleRawCompressTypeSplice splice = get_single_raw_compress_type_splice(
+            diffInfo, diff.size(), diff.data());
+        if (!splice.shouldSplice) {
+            return;
+        }
+        diff.erase(diff.begin() + (size_t)splice.writePos,
+                   diff.begin() + (size_t)splice.readPos);
+    }
+
+    void normalize_single_raw_compress_type(const char* diffPath) {
+        hpatch_TFileStreamInput diffIn;
+        hpatch_TFileStreamInput_init(&diffIn);
+        bool diffInOpened = false;
+
+        hpatch_singleCompressedDiffInfo diffInfo;
+        hpatch_StreamPos_t oldDiffSize = 0;
+        uint8_t prefixBytes[kSingleDiffPrefixSize];
+        try {
+            if (!hpatch_TFileStreamInput_open(&diffIn, diffPath)) {
+                throw std::runtime_error("open diff file for read failed.");
+            }
+            diffInOpened = true;
+            oldDiffSize = diffIn.base.streamSize;
+            if ((oldDiffSize < kSingleDiffPrefixSize) ||
+                !diffIn.base.read(&diffIn.base, 0, prefixBytes,
+                                  prefixBytes + kSingleDiffPrefixSize)) {
+                throw std::runtime_error("single diff header layout error.");
+            }
+            if (!getSingleCompressedDiffInfo(&diffInfo, &diffIn.base, 0)) {
+                throw std::runtime_error("getSingleCompressedDiffInfo() failed, invalid diff data!");
+            }
+        } catch (...) {
+            if (diffInOpened) hpatch_TFileStreamInput_close(&diffIn);
+            throw;
+        }
+        diffInOpened = false;
+        if (!hpatch_TFileStreamInput_close(&diffIn)) {
+            throw std::runtime_error("close diff file failed.");
+        }
+
+        SingleRawCompressTypeSplice splice = get_single_raw_compress_type_splice(
+            diffInfo, oldDiffSize, prefixBytes);
+        if (!splice.shouldSplice) {
+            return;
+        }
+
+        FileRewriteGuard diffOut;
+        diffOut.open(diffPath);
+
+        const size_t kBufSize = hpatch_kFileIOBufBetterSize;
+        std::vector<uint8_t> buf(kBufSize);
+        hpatch_StreamPos_t readPos = splice.readPos;
+        hpatch_StreamPos_t writePos = splice.writePos;
+        while (readPos < oldDiffSize) {
+            hpatch_StreamPos_t readLen = oldDiffSize - readPos;
+            if (readLen > (hpatch_StreamPos_t)buf.size()) {
+                readLen = (hpatch_StreamPos_t)buf.size();
+            }
+            if (!diffOut.stream.base.read_writed(&diffOut.stream.base, readPos,
+                                                 buf.data(), buf.data() + (size_t)readLen)) {
+                throw std::runtime_error("read diff file for rewrite failed.");
+            }
+            if (!diffOut.stream.base.write(&diffOut.stream.base, writePos,
+                                           buf.data(), buf.data() + (size_t)readLen)) {
+                throw std::runtime_error("rewrite diff file failed.");
+            }
+            readPos += readLen;
+            writePos += readLen;
+        }
+        if (!hpatch_TFileStreamOutput_flush(&diffOut.stream)) {
+            throw std::runtime_error("flush diff file failed.");
+        }
+        if (!hpatch_TFileStreamOutput_truncate(&diffOut.stream, splice.newSize)) {
+            throw std::runtime_error("truncate diff file failed.");
+        }
+        diffOut.close();
+    }
 }
 
 void hdiff(const uint8_t* old, size_t oldsize, const uint8_t* _new, size_t newsize,
@@ -110,6 +263,7 @@ void hdiff(const uint8_t* old, size_t oldsize, const uint8_t* _new, size_t newsi
     create_single_compressed_diff(_new, _new + newsize, old, old + oldsize, out_codeBuf,
                                   &compressPlugin.base, kPatchStepMemSize,
                                   kSingleMatchScore);
+    normalize_single_raw_compress_type(out_codeBuf);
 
     if (!check_single_compressed_diff(_new, _new + newsize, old, old + oldsize,
                                       out_codeBuf.data(),
@@ -173,6 +327,7 @@ void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPat
                                          kSingleMatchScore);
 
     streams.closeDiffOut();
+    normalize_single_raw_compress_type(outDiffPath);
     streams.openDiffIn(outDiffPath);
     if (!check_single_compressed_diff(&streams.newStream.base, &streams.oldStream.base,
                                       &streams.diffInStream.base, decompressPlugin)) {
@@ -200,6 +355,7 @@ void hdiff_single_stream(const char* oldPath,const char* newPath,const char* out
                                          kMatchBlockSize_default);
 
     streams.closeDiffOut();
+    normalize_single_raw_compress_type(outDiffPath);
     streams.openDiffIn(outDiffPath);
     if (!check_single_compressed_diff(&streams.newStream.base, &streams.oldStream.base,
                                       &streams.diffInStream.base, decompressPlugin)) {
