@@ -52,65 +52,23 @@ var uint8Patched = hdiffpatch.patch(uint8Old, uint8Diff);
 assert.deepStrictEqual(Buffer.from(uint8Patched), newData);
 console.log("  ✓ Uint8Array works");
 
-console.log("\nTest 5: diffWithCovers emits patchable hdiff...");
-var coverOld = Buffer.from("abcXYZdef");
-var coverNew = Buffer.from("abc123def");
-var coverResult = hdiffpatch.diffWithCovers(coverOld, coverNew, [
-  { oldPos: "0", newPos: "0", len: "3" },
-  { oldPos: "6", newPos: "6", len: "3" },
-]);
-assert(Buffer.isBuffer(coverResult.diff));
-assert.strictEqual(coverResult.usedCovers, true);
-assert.strictEqual(coverResult.requestedCoverCount, 2);
-assert(Number.isInteger(coverResult.nativeCoverCapacity));
-assert(coverResult.nativeCoverCapacity >= 0);
-assert.strictEqual(coverResult.finalCoverCount, 2);
-assert.strictEqual(coverResult.coverMode, "replace");
-assert.deepStrictEqual(hdiffpatch.patch(coverOld, coverResult.diff), coverNew);
-var mergeCoverResult = hdiffpatch.diffWithCovers(coverOld, coverNew, [
-  { oldPos: "0", newPos: "0", len: "3" },
-  { oldPos: "6", newPos: "6", len: "3" },
-], { mode: "merge", debugCovers: true });
-assert(Buffer.isBuffer(mergeCoverResult.diff));
-assert.strictEqual(mergeCoverResult.usedCovers, true);
-assert.strictEqual(mergeCoverResult.requestedCoverCount, 2);
-assert.strictEqual(mergeCoverResult.coverMode, "merge");
-assert(Number.isInteger(mergeCoverResult.finalCoverCount));
-assert(mergeCoverResult.finalCoverCount >= mergeCoverResult.nativeCoverCapacity);
-assert(Array.isArray(mergeCoverResult.nativeCovers));
-assert(Array.isArray(mergeCoverResult.finalCovers));
-assert.strictEqual(mergeCoverResult.nativeCovers.length, mergeCoverResult.nativeCoverCapacity);
-assert.strictEqual(mergeCoverResult.finalCovers.length, mergeCoverResult.finalCoverCount);
-assert.deepStrictEqual(hdiffpatch.patch(coverOld, mergeCoverResult.diff), coverNew);
-var coalescedCoverResult = hdiffpatch.diffWithCovers(coverOld, coverNew, [], {
-  mode: "native-coalesce",
-  debugCovers: true,
-});
-assert(Buffer.isBuffer(coalescedCoverResult.diff));
-assert.strictEqual(coalescedCoverResult.usedCovers, true);
-assert.strictEqual(coalescedCoverResult.requestedCoverCount, 0);
-assert.strictEqual(coalescedCoverResult.coverMode, "native-coalesce");
-assert(Array.isArray(coalescedCoverResult.nativeCovers));
-assert(Array.isArray(coalescedCoverResult.finalCovers));
-assert(coalescedCoverResult.finalCoverCount <= coalescedCoverResult.nativeCoverCapacity);
-assert.deepStrictEqual(hdiffpatch.patch(coverOld, coalescedCoverResult.diff), coverNew);
-assert.throws(
-  () => hdiffpatch.diffWithCovers(coverOld, coverNew, [
-    { oldPos: "99", newPos: "0", len: "1" },
-  ]),
-  /old range is out of bounds/
-);
-assert.throws(
-  () => hdiffpatch.diffWithCovers(coverOld, coverNew, [], { mode: "invalid" }),
-  /Invalid options.mode/
-);
-assert.throws(
-  () => hdiffpatch.diffWithCovers(coverOld, coverNew, [
-    { oldPos: "-1", newPos: "0", len: "1" },
-  ]),
-  /Invalid cover/
-);
-console.log("  ✓ diffWithCovers patch(old, diff) === new");
+console.log("\nTest 5: diffSingleStream (single format, low-memory generation)...");
+var ssDir = fs.mkdtempSync(path.join(os.tmpdir(), "hdiffpatch-ss-"));
+var ssOldPath = path.join(ssDir, "old.bin");
+var ssNewPath = path.join(ssDir, "new.bin");
+var ssDiffPath = path.join(ssDir, "diff.bin");
+var ssOutPath = path.join(ssDir, "out.bin");
+fs.writeFileSync(ssOldPath, oldData);
+fs.writeFileSync(ssNewPath, newData);
+var ssDiffOut = hdiffpatch.diffSingleStream(ssOldPath, ssNewPath, ssDiffPath);
+assert.strictEqual(ssDiffOut, ssDiffPath);
+var ssDiffData = fs.readFileSync(ssDiffPath);
+// 产物是 single 格式:内存版 patch() 能直接应用(与 diff() 产物同规范)
+assert.deepStrictEqual(hdiffpatch.patch(oldData, ssDiffData), newData);
+// 文件版 patchSingleStream 也能应用
+hdiffpatch.patchSingleStream(ssOldPath, ssDiffPath, ssOutPath);
+assert.deepStrictEqual(fs.readFileSync(ssOutPath), newData);
+console.log("  ✓ diffSingleStream output applies via patch() and patchSingleStream()");
 
 console.log("\nTest 6: Single-compressed patchSingleStream (file paths)...");
 var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hdiffpatch-"));

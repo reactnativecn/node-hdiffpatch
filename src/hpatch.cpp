@@ -84,11 +84,12 @@ void hpatch(const uint8_t* old, size_t oldsize,
     listener.onPatchFinish = nullptr;
     
     // Execute patch
-    if (!patch_single_stream_by_mem(&listener,
-                                    out_newBuf.data(), out_newBuf.data() + out_newBuf.size(),
-                                    old, old + oldsize,
-                                    diff, diff + diffsize)) {
-        throw std::runtime_error("patch_single_stream_by_mem() failed!");
+    if (!patch_single_stream_mem(&listener,
+                                 out_newBuf.data(), out_newBuf.data() + out_newBuf.size(),
+                                 old, old + oldsize,
+                                 diff, diff + diffsize,
+                                 0 /*coversListener*/, 1 /*threadNum*/)) {
+        throw std::runtime_error("patch_single_stream_mem() failed!");
     }
 }
 
@@ -134,8 +135,9 @@ void hpatch_single_stream(const char* oldPath,const char* diffPath,const char* o
         listener.onDiffInfo = onDiffInfo;
         listener.onPatchFinish = nullptr;
 
-        if (!patch_single_stream_by(&listener, &newStream.base, &oldStream.base, &diffStream.base, 0)) {
-            throw std::runtime_error("patch_single_stream_by() failed!");
+        if (!patch_single_stream(&listener, &newStream.base, &oldStream.base, &diffStream.base,
+                                 0 /*diffInfo_pos*/, 0 /*coversListener*/, 1 /*threadNum*/)) {
+            throw std::runtime_error("patch_single_stream() failed!");
         }
     } catch (...) {
         if (newOpened) hpatch_TFileStreamOutput_close(&newStream);

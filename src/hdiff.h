@@ -8,34 +8,12 @@
 #include <stdint.h>
 #include <vector>
 
-struct HdiffCover {
-    uint64_t oldPos;
-    uint64_t newPos;
-    uint64_t length;
-};
-
-enum class HdiffCoverMode {
-    Replace,
-    Merge,
-    NativeCoalesce,
-};
-
-struct HdiffWithCoversResult {
-    bool usedCovers;
-    size_t requestedCoverCount;
-    size_t nativeCoverCapacity;
-    size_t finalCoverCount;
-    std::vector<HdiffCover> nativeCovers;
-    std::vector<HdiffCover> finalCovers;
-};
-
 void hdiff(const uint8_t* old,size_t oldsize,const uint8_t* _new,size_t newsize,
 		   std::vector<uint8_t>& out_codeBuf);
-HdiffWithCoversResult hdiff_with_covers(const uint8_t* old, size_t oldsize,
-                                        const uint8_t* _new, size_t newsize,
-                                        const HdiffCover* covers, size_t coverCount,
-                                        HdiffCoverMode coverMode,
-                                        std::vector<uint8_t>& out_codeBuf);
+// HDIFF13 流式(生成端低内存,产物需 patchStream 应用)
 void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPath);
+// HDIFFSF20 single 格式的流式生成(生成端低内存,产物与 diff() 同格式,
+// 任何既有 single 应用端可直接使用)
+void hdiff_single_stream(const char* oldPath,const char* newPath,const char* outDiffPath);
 
 #endif

@@ -38,143 +38,6 @@ namespace hdiffpatchNode
         return true;
     }
 
-    inline bool parseUint64String(const std::string& value, uint64_t* out) {
-        // 手写十进制解析而不用 strtoull:新 glibc 上 strtoull 绑定
-        // __isoc23_strtoull@GLIBC_2.38,会把 linux prebuild 的最低 glibc
-        // 要求抬到 2.38(Ubuntu 22.04/Debian 12 都载入失败)。
-        // 只接受纯十进制(拒绝前导空白/'+'/'-'/十六进制),溢出返回 false。
-        if (value.empty()) return false;
-        uint64_t result = 0;
-        for (const char c : value) {
-            if (c < '0' || c > '9') return false;
-            const uint64_t digit = static_cast<uint64_t>(c - '0');
-            if (result > (std::numeric_limits<uint64_t>::max() - digit) / 10) {
-                return false;
-            }
-            result = result * 10 + digit;
-        }
-        *out = result;
-        return true;
-    }
-
-    inline bool getUint64Value(const Napi::Value& value, uint64_t* out) {
-        if (value.IsString()) {
-            return parseUint64String(value.As<Napi::String>().Utf8Value(), out);
-        }
-        if (value.IsNumber()) {
-            const double number = value.As<Napi::Number>().DoubleValue();
-            if (!std::isfinite(number) || number < 0 || std::floor(number) != number ||
-                number > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
-                return false;
-            }
-            *out = static_cast<uint64_t>(number);
-            return true;
-        }
-        if (value.IsBigInt()) {
-            bool lossless = false;
-            uint64_t parsed = value.As<Napi::BigInt>().Uint64Value(&lossless);
-            if (!lossless) return false;
-            *out = parsed;
-            return true;
-        }
-        return false;
-    }
-
-    inline bool getCoverField(const Napi::Object& cover, const char* primary,
-                              const char* fallback, uint64_t* out) {
-        if (cover.Has(primary) && getUint64Value(cover.Get(primary), out)) {
-            return true;
-        }
-        if (fallback && cover.Has(fallback) && getUint64Value(cover.Get(fallback), out)) {
-            return true;
-        }
-        return false;
-    }
-
-    std::vector<HdiffCover> getCoverList(const Napi::Value& arg) {
-        if (!arg.IsArray()) {
-            throw std::runtime_error("Invalid arguments: expected covers array.");
-        }
-
-        Napi::Array array = arg.As<Napi::Array>();
-        std::vector<HdiffCover> covers;
-        covers.reserve(array.Length());
-
-        for (uint32_t i = 0; i < array.Length(); ++i) {
-            Napi::Value item = array.Get(i);
-            if (!item.IsObject()) {
-                throw std::runtime_error("Invalid cover: expected object.");
-            }
-            Napi::Object coverObject = item.As<Napi::Object>();
-            HdiffCover cover = {0, 0, 0};
-            if (!getCoverField(coverObject, "oldPos", "old_pos", &cover.oldPos) ||
-                !getCoverField(coverObject, "newPos", "new_pos", &cover.newPos) ||
-                !getCoverField(coverObject, "len", "length", &cover.length)) {
-                throw std::runtime_error("Invalid cover: expected oldPos, newPos, and len.");
-            }
-            covers.push_back(cover);
-        }
-
-        return covers;
-    }
-
-    HdiffCoverMode getCoverMode(const Napi::CallbackInfo& info, size_t optionsIndex) {
-        if (info.Length() <= optionsIndex || info[optionsIndex].IsUndefined() || info[optionsIndex].IsNull()) {
-            return HdiffCoverMode::Replace;
-        }
-        if (!info[optionsIndex].IsObject()) {
-            throw std::runtime_error("Invalid options: expected object.");
-        }
-
-        Napi::Object options = info[optionsIndex].As<Napi::Object>();
-        if (!options.Has("mode") || options.Get("mode").IsUndefined() || options.Get("mode").IsNull()) {
-            return HdiffCoverMode::Replace;
-        }
-        if (!options.Get("mode").IsString()) {
-            throw std::runtime_error("Invalid options.mode: expected 'replace', 'merge', or 'native-coalesce'.");
-        }
-
-        const std::string mode = options.Get("mode").As<Napi::String>().Utf8Value();
-        if (mode == "replace") {
-            return HdiffCoverMode::Replace;
-        }
-        if (mode == "merge") {
-            return HdiffCoverMode::Merge;
-        }
-        if (mode == "native-coalesce" || mode == "native_coalesce") {
-            return HdiffCoverMode::NativeCoalesce;
-        }
-        throw std::runtime_error("Invalid options.mode: expected 'replace', 'merge', or 'native-coalesce'.");
-    }
-
-    bool getDebugCoversOption(const Napi::CallbackInfo& info, size_t optionsIndex) {
-        if (info.Length() <= optionsIndex || info[optionsIndex].IsUndefined() || info[optionsIndex].IsNull()) {
-            return false;
-        }
-        if (!info[optionsIndex].IsObject()) {
-            throw std::runtime_error("Invalid options: expected object.");
-        }
-
-        Napi::Object options = info[optionsIndex].As<Napi::Object>();
-        if (!options.Has("debugCovers")) {
-            return false;
-        }
-        Napi::Value debugCovers = options.Get("debugCovers");
-        return debugCovers.IsBoolean() && debugCovers.As<Napi::Boolean>().Value();
-    }
-
-    const char* coverModeName(HdiffCoverMode mode) {
-        switch (mode) {
-            case HdiffCoverMode::Merge:
-                return "merge";
-            case HdiffCoverMode::NativeCoalesce:
-                return "native-coalesce";
-            case HdiffCoverMode::Replace:
-            default:
-                return "replace";
-        }
-    }
-
     inline Napi::Buffer<uint8_t> bufferFromVector(Napi::Env env, std::vector<uint8_t>&& data) {
         if (data.empty()) {
             return Napi::Buffer<uint8_t>::New(env, 0);
@@ -189,22 +52,6 @@ namespace hdiffpatchNode
             },
             vec
         );
-    }
-
-    Napi::Object coverToObject(Napi::Env env, const HdiffCover& cover) {
-        Napi::Object object = Napi::Object::New(env);
-        object.Set(Napi::String::New(env, "oldPos"), Napi::String::New(env, std::to_string(cover.oldPos)));
-        object.Set(Napi::String::New(env, "newPos"), Napi::String::New(env, std::to_string(cover.newPos)));
-        object.Set(Napi::String::New(env, "len"), Napi::String::New(env, std::to_string(cover.length)));
-        return object;
-    }
-
-    Napi::Array coversToArray(Napi::Env env, const std::vector<HdiffCover>& covers) {
-        Napi::Array array = Napi::Array::New(env, covers.size());
-        for (uint32_t i = 0; i < covers.size(); ++i) {
-            array.Set(i, coverToObject(env, covers[i]));
-        }
-        return array;
     }
 
     // ============ 异步 Diff Worker ============
@@ -426,6 +273,45 @@ namespace hdiffpatchNode
         std::string outNewPath_;
     };
 
+    // ============ 异步 Single-compressed Stream Diff Worker ============
+    class DiffSingleStreamAsyncWorker : public Napi::AsyncWorker {
+    public:
+        DiffSingleStreamAsyncWorker(Napi::Function& callback,
+                                    std::string oldPath,
+                                    std::string newPath,
+                                    std::string outDiffPath)
+            : Napi::AsyncWorker(callback),
+              oldPath_(std::move(oldPath)),
+              newPath_(std::move(newPath)),
+              outDiffPath_(std::move(outDiffPath)) {
+        }
+
+        void Execute() override {
+            try {
+                hdiff_single_stream(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str());
+            } catch (const std::exception& e) {
+                SetError(e.what());
+            }
+        }
+
+        void OnOK() override {
+            Napi::Env env = Env();
+            Napi::HandleScope scope(env);
+            Callback().Call({env.Null(), Napi::String::New(env, outDiffPath_)});
+        }
+
+        void OnError(const Napi::Error& e) override {
+            Napi::Env env = Env();
+            Napi::HandleScope scope(env);
+            Callback().Call({e.Value()});
+        }
+
+    private:
+        std::string oldPath_;
+        std::string newPath_;
+        std::string outDiffPath_;
+    };
+
     // ============ 同步/异步 diff ============
     Napi::Value diff(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
@@ -463,64 +349,6 @@ namespace hdiffpatchNode
         }
 
         return bufferFromVector(env, std::move(codeBuf));
-    }
-
-    // ============ 同步 diffWithCovers ============
-    Napi::Value diffWithCovers(const Napi::CallbackInfo& info) {
-        Napi::Env env = info.Env();
-
-        const uint8_t* oldData = nullptr;
-        size_t oldLength = 0;
-        const uint8_t* newData = nullptr;
-        size_t newLength = 0;
-
-        if (info.Length() < 3 ||
-            !getBufferData(info[0], &oldData, &oldLength) ||
-            !getBufferData(info[1], &newData, &newLength)) {
-            Napi::TypeError::New(env, "Invalid arguments: expected Buffer or TypedArray and covers array.")
-                .ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
-
-        std::vector<HdiffCover> covers;
-        HdiffCoverMode coverMode = HdiffCoverMode::Replace;
-        bool debugCovers = false;
-        try {
-            covers = getCoverList(info[2]);
-            coverMode = getCoverMode(info, 3);
-            debugCovers = getDebugCoversOption(info, 3);
-        } catch (const std::exception& e) {
-            Napi::TypeError::New(env, e.what()).ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
-
-        std::vector<uint8_t> codeBuf;
-        HdiffWithCoversResult coverResult = {false, 0, 0, 0, {}, {}};
-        try {
-            coverResult = hdiff_with_covers(oldData, oldLength, newData, newLength,
-                                            covers.empty() ? nullptr : covers.data(),
-                                            covers.size(), coverMode, codeBuf);
-        } catch (const std::exception& e) {
-            Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
-            return env.Undefined();
-        }
-
-        Napi::Object result = Napi::Object::New(env);
-        result.Set(Napi::String::New(env, "diff"), bufferFromVector(env, std::move(codeBuf)));
-        result.Set(Napi::String::New(env, "usedCovers"), Napi::Boolean::New(env, coverResult.usedCovers));
-        result.Set(Napi::String::New(env, "requestedCoverCount"),
-                   Napi::Number::New(env, static_cast<double>(coverResult.requestedCoverCount)));
-        result.Set(Napi::String::New(env, "nativeCoverCapacity"),
-                   Napi::Number::New(env, static_cast<double>(coverResult.nativeCoverCapacity)));
-        result.Set(Napi::String::New(env, "finalCoverCount"),
-                   Napi::Number::New(env, static_cast<double>(coverResult.finalCoverCount)));
-        result.Set(Napi::String::New(env, "coverMode"),
-                   Napi::String::New(env, coverModeName(coverMode)));
-        if (debugCovers) {
-            result.Set(Napi::String::New(env, "nativeCovers"), coversToArray(env, coverResult.nativeCovers));
-            result.Set(Napi::String::New(env, "finalCovers"), coversToArray(env, coverResult.finalCovers));
-        }
-        return result;
     }
 
     // ============ 同步/异步 patch ============
@@ -638,6 +466,43 @@ namespace hdiffpatchNode
         return Napi::String::New(env, outNewPath);
     }
 
+    // ============ 同步/异步 diffSingleStream ============
+    // single 格式(HDIFFSF20)的流式生成:低内存(块匹配),产物与 diff()
+    // 同格式,所有既有 single 应用端(含历史客户端)可直接应用。
+    Napi::Value diffSingleStream(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+
+        std::string oldPath;
+        std::string newPath;
+        std::string outDiffPath;
+        if (info.Length() < 3 ||
+            !getStringUtf8(info[0], oldPath) ||
+            !getStringUtf8(info[1], newPath) ||
+            !getStringUtf8(info[2], outDiffPath)) {
+            Napi::TypeError::New(env, "Invalid arguments: expected (oldPath, newPath, outDiffPath).")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        if (info.Length() > 3 && info[3].IsFunction()) {
+            Napi::Function callback = info[3].As<Napi::Function>();
+            DiffSingleStreamAsyncWorker* worker = new DiffSingleStreamAsyncWorker(
+                callback, oldPath, newPath, outDiffPath
+            );
+            worker->Queue();
+            return env.Undefined();
+        }
+
+        try {
+            hdiff_single_stream(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str());
+        } catch (const std::exception& e) {
+            Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        return Napi::String::New(env, outDiffPath);
+    }
+
     // ============ 同步/异步 patchSingleStream ============
     Napi::Value patchSingleStream(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
@@ -675,10 +540,10 @@ namespace hdiffpatchNode
 
     Napi::Object Init(Napi::Env env, Napi::Object exports) {
         exports.Set(Napi::String::New(env, "diff"), Napi::Function::New(env, diff));
-        exports.Set(Napi::String::New(env, "diffWithCovers"), Napi::Function::New(env, diffWithCovers));
         exports.Set(Napi::String::New(env, "patch"), Napi::Function::New(env, patch));
         exports.Set(Napi::String::New(env, "diffStream"), Napi::Function::New(env, diffStream));
         exports.Set(Napi::String::New(env, "patchStream"), Napi::Function::New(env, patchStream));
+        exports.Set(Napi::String::New(env, "diffSingleStream"), Napi::Function::New(env, diffSingleStream));
         exports.Set(Napi::String::New(env, "patchSingleStream"), Napi::Function::New(env, patchSingleStream));
         return exports;
     }

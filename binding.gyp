@@ -17,6 +17,8 @@
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/limit_mem_diff/digest_matcher.cpp",
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/limit_mem_diff/stream_serialize.cpp",
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/limit_mem_diff/adler_roll.c",
+        "HDiffPatch/libHDiffPatch/HDiff/private_diff/match_block.cpp",
+        "HDiffPatch/libHDiffPatch/HDiff/private_diff/match_inplace.cpp",
         "lzma/C/LzFind.c",
         "lzma/C/LzmaDec.c",
         "lzma/C/LzmaEnc.c",
@@ -26,7 +28,9 @@
       "defines": [
         "_IS_NEED_DIR_DIFF_PATCH=0",
         "_7ZIP_ST",
+        "Z7_ST",
         "_IS_USED_MULTITHREAD=0",
+        "_IS_OUT_DIFF_INFO=0",
         "NAPI_VERSION=8"
       ],
       "include_dirs" : [

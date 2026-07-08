@@ -32,8 +32,8 @@ const native = loadNative();
 exports.native = native;
 
 exports.diff = native.diff;
-exports.diffWithCovers = native.diffWithCovers;
 exports.patch = native.patch;
 exports.diffStream = native.diffStream;
 exports.patchStream = native.patchStream;
+exports.diffSingleStream = native.diffSingleStream;
 exports.patchSingleStream = native.patchSingleStream;
