@@ -38,11 +38,23 @@ export interface NativeAddon {
     outNewPath: string,
     cb: StreamCallback
   ): void;
-  diffWindow(oldPath: string, newPath: string, outDiffPath: string): string;
   diffWindow(
     oldPath: string,
     newPath: string,
     outDiffPath: string,
+    windowSize?: number
+  ): string;
+  diffWindow(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    cb: StreamCallback
+  ): void;
+  diffWindow(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    windowSize: number,
     cb: StreamCallback
   ): void;
 }
@@ -110,16 +122,26 @@ export function patchSingleStream(
 ): void;
 
 // window 模式生成 HDIFFSF20 single 格式 patch:匹配质量接近内存版
-// diff(),内存占用保持流式档;产物用 patch()/patchSingleStream() 应用
+// diff(),内存占用保持流式档;产物用 patch()/patchSingleStream() 应用。
+// windowSize 为 old 数据滑动窗口字节数(缺省 2MB),调大可捕获更长距离
+// 的内容移动,内存占用近似线性增长。
 export function diffWindow(
   oldPath: string,
   newPath: string,
-  outDiffPath: string
+  outDiffPath: string,
+  windowSize?: number
 ): string;
 export function diffWindow(
   oldPath: string,
   newPath: string,
   outDiffPath: string,
+  cb: StreamCallback
+): void;
+export function diffWindow(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string,
+  windowSize: number,
   cb: StreamCallback
 ): void;
 

@@ -472,16 +472,19 @@ namespace hdiffpatchNode
         DiffWindowAsyncWorker(Napi::Function& callback,
                               std::string oldPath,
                               std::string newPath,
-                              std::string outDiffPath)
+                              std::string outDiffPath,
+                              size_t windowSize)
             : Napi::AsyncWorker(callback),
               oldPath_(std::move(oldPath)),
               newPath_(std::move(newPath)),
-              outDiffPath_(std::move(outDiffPath)) {
+              outDiffPath_(std::move(outDiffPath)),
+              windowSize_(windowSize) {
         }
 
         void Execute() override {
             try {
-                hdiff_window(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str());
+                hdiff_window(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str(),
+                             windowSize_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -503,6 +506,7 @@ namespace hdiffpatchNode
         std::string oldPath_;
         std::string newPath_;
         std::string outDiffPath_;
+        size_t windowSize_;
     };
 
     // ============ 同步/异步 diffSingleStream ============
@@ -546,6 +550,9 @@ namespace hdiffpatchNode
     // single 格式(HDIFFSF20)的 window 模式生成:大块流式匹配 + 窗口内
     // 后缀串精修,匹配质量接近内存版 diff() 而内存占用保持流式档。
     // 产物与 diff()/diffSingleStream() 同格式,既有应用端可直接应用。
+    // 签名:(oldPath, newPath, outDiffPath[, windowSize][, cb])
+    // windowSize 为 old 数据滑动窗口字节数(缺省 2MB),调大可捕获更长
+    // 距离的内容移动,内存占用近似线性增长。
     Napi::Value diffWindow(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
 
@@ -556,22 +563,36 @@ namespace hdiffpatchNode
             !getStringUtf8(info[0], oldPath) ||
             !getStringUtf8(info[1], newPath) ||
             !getStringUtf8(info[2], outDiffPath)) {
-            Napi::TypeError::New(env, "Invalid arguments: expected (oldPath, newPath, outDiffPath).")
+            Napi::TypeError::New(env, "Invalid arguments: expected (oldPath, newPath, outDiffPath[, windowSize][, cb]).")
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }
 
-        if (info.Length() > 3 && info[3].IsFunction()) {
-            Napi::Function callback = info[3].As<Napi::Function>();
+        size_t windowSize = 0;  // 0 = 使用默认窗口(2MB)
+        size_t argIdx = 3;
+        if (info.Length() > argIdx && info[argIdx].IsNumber()) {
+            double raw = info[argIdx].As<Napi::Number>().DoubleValue();
+            if (!std::isfinite(raw) || raw < 0 ||
+                raw > static_cast<double>(std::numeric_limits<size_t>::max())) {
+                Napi::TypeError::New(env, "Invalid windowSize: expected a non-negative integer.")
+                    .ThrowAsJavaScriptException();
+                return env.Undefined();
+            }
+            windowSize = static_cast<size_t>(raw);
+            argIdx++;
+        }
+
+        if (info.Length() > argIdx && info[argIdx].IsFunction()) {
+            Napi::Function callback = info[argIdx].As<Napi::Function>();
             DiffWindowAsyncWorker* worker = new DiffWindowAsyncWorker(
-                callback, oldPath, newPath, outDiffPath
+                callback, oldPath, newPath, outDiffPath, windowSize
             );
             worker->Queue();
             return env.Undefined();
         }
 
         try {
-            hdiff_window(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str());
+            hdiff_window(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str(), windowSize);
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();

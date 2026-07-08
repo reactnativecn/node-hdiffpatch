@@ -145,7 +145,8 @@ void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPat
     streams.closeAllOrThrow();
 }
 
-void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPath){
+void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPath,
+                  size_t windowSize){
     if (!oldPath || !newPath || !outDiffPath) {
         throw std::runtime_error("Invalid file path.");
     }
@@ -158,13 +159,15 @@ void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPat
     streams.openInputs(oldPath, newPath);
     streams.openDiffOut(outDiffPath);
 
-    // window 模式:大块流式匹配拿大 cover,再在 old 数据的滑动窗口
-    // (默认 2MB)内做后缀串精修。除 patchStepMemSize/匹配分沿用本库
-    // 固定值外,其余参数取 v5 默认。
+    // window 模式:大块流式匹配拿大 cover,再在 old 数据的滑动窗口内做
+    // 后缀串精修。窗口默认 2MB,可调大以捕获更长距离的内容移动;
+    // kSegSize 传 0 由上游自动取 windowSize/64。除 patchStepMemSize/
+    // 匹配分沿用本库固定值外,其余参数取 v5 默认。
+    if (windowSize == 0) windowSize = kDefaultWindowOldSize;
     create_single_compressed_diff_window(&streams.newStream.base, &streams.oldStream.base,
                                          &streams.diffOutStream.base,
                                          &compressPlugin.base, kPatchStepMemSize,
-                                         kDefaultWindowOldSize, 0,
+                                         windowSize, 0,
                                          kDefaultBigCoverSize, kMatchWindowsBlockSize_default,
                                          kDefaultFastMatchBlockSize,
                                          kSingleMatchScore);

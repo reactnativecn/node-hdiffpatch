@@ -90,6 +90,14 @@ console.log(
   "  ✓ diffWindow output (" + winDiffData.length + "B vs diff " + diffResult.length +
   "B) applies via patch() and patchSingleStream()"
 );
+// 显式 windowSize(8MB)同步调用
+var winDiff8Path = path.join(ssDir, "win8.diff");
+hdiffpatch.diffWindow(ssOldPath, ssNewPath, winDiff8Path, 8 * 1024 * 1024);
+var winDiff8Data = fs.readFileSync(winDiff8Path);
+assert.strictEqual(winDiff8Data.slice(0, 9).toString("latin1"), "HDIFFSF20");
+assert.deepStrictEqual(hdiffpatch.patch(oldData, winDiff8Data), newData);
+assert.throws(() => hdiffpatch.diffWindow(ssOldPath, ssNewPath, winDiff8Path, -1));
+console.log("  ✓ diffWindow with explicit windowSize works, invalid size throws");
 
 console.log("\nTest 6: Single-compressed patchSingleStream (file paths)...");
 var tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hdiffpatch-"));
@@ -165,6 +173,14 @@ async function runAsyncTests() {
   var asyncWinDiffPath = path.join(tempDir, "async-win.diff");
   assert.strictEqual(await diffWindowAsync(oldPath, newPath, asyncWinDiffPath), asyncWinDiffPath);
   assert.deepStrictEqual(hdiffpatch.patch(oldData, fs.readFileSync(asyncWinDiffPath)), newData);
+  // 带 windowSize 的异步形态:(old, new, out, windowSize, cb)
+  var asyncWin8Path = path.join(tempDir, "async-win8.diff");
+  await new Promise((resolve, reject) => {
+    hdiffpatch.diffWindow(oldPath, newPath, asyncWin8Path, 4 * 1024 * 1024, (err, out) =>
+      err ? reject(err) : resolve(out)
+    );
+  });
+  assert.deepStrictEqual(hdiffpatch.patch(oldData, fs.readFileSync(asyncWin8Path)), newData);
   await assert.rejects(
     () => diffWindowAsync(path.join(tempDir, "no-such.bin"), newPath, asyncWinDiffPath)
   );

@@ -16,7 +16,10 @@ void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPat
 // 任何既有 single 应用端可直接使用)
 void hdiff_single_stream(const char* oldPath,const char* newPath,const char* outDiffPath);
 // HDIFFSF20 single 格式的 window 模式生成:大块流式匹配 + 窗口内后缀串
-// 精修,匹配质量接近内存版而内存占用保持流式档;产物与 diff() 同格式
-void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPath);
+// 精修,匹配质量接近内存版而内存占用保持流式档;产物与 diff() 同格式。
+// windowSize 为 old 数据滑动窗口字节数,0 表示用默认值(2MB);窗口越大
+// 能捕获越长距离的内容移动,内存占用近似随之线性增长。
+void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPath,
+                  size_t windowSize=0);
 
 #endif

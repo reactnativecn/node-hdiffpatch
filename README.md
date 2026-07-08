@@ -46,7 +46,7 @@ in-memory `diff()` for the same inputs; prefer `diff()` when memory allows.
 In sync mode returns `outDiffPath`; async callback signature is
 `(err, outDiffPath)`.
 
-### diffWindow(oldPath, newPath, outDiffPath[, cb])
+### diffWindow(oldPath, newPath, outDiffPath[, windowSize][, cb])
 
 Create a **single-format** (same wire format as `diff()`) patch using window
 mode: big covers come from streaming block matching, then residuals are
@@ -56,6 +56,9 @@ stays at the streaming tier — usually a much smaller patch than
 `diffSingleStream()` for the same inputs. The output applies with `patch()`,
 `patchSingleStream()`, and any existing single-format apply side. In sync mode
 returns `outDiffPath`; async callback signature is `(err, outDiffPath)`.
+`windowSize` is the sliding-window byte size over the old data (default 2MB);
+a larger window catches longer-distance content moves at roughly linear
+additional memory.
 
 ### patchSingleStream(oldPath, diffPath, outNewPath[, cb])
 
