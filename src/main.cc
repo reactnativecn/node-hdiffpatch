@@ -4,9 +4,7 @@
  * Created by housisong on 2021.04.07, refactored 2026.01.20
  */
 #include <napi.h>
-#include <cerrno>
 #include <cmath>
-#include <cstdlib>
 #include <limits>
 #include <string>
 #include <utility>
@@ -41,14 +39,21 @@ namespace hdiffpatchNode
     }
 
     inline bool parseUint64String(const std::string& value, uint64_t* out) {
+        // 手写十进制解析而不用 strtoull:新 glibc 上 strtoull 绑定
+        // __isoc23_strtoull@GLIBC_2.38,会把 linux prebuild 的最低 glibc
+        // 要求抬到 2.38(Ubuntu 22.04/Debian 12 都载入失败)。
+        // 只接受纯十进制(拒绝前导空白/'+'/'-'/十六进制),溢出返回 false。
         if (value.empty()) return false;
-        // strtoull 会接受前导 '-' 并做二补回绕("-1" → UINT64_MAX),显式拒绝
-        if (value.find('-') != std::string::npos) return false;
-        errno = 0;
-        char* end = nullptr;
-        unsigned long long parsed = std::strtoull(value.c_str(), &end, 10);
-        if (errno == ERANGE || end == value.c_str() || *end != '\0') return false;
-        *out = static_cast<uint64_t>(parsed);
+        uint64_t result = 0;
+        for (const char c : value) {
+            if (c < '0' || c > '9') return false;
+            const uint64_t digit = static_cast<uint64_t>(c - '0');
+            if (result > (std::numeric_limits<uint64_t>::max() - digit) / 10) {
+                return false;
+            }
+            result = result * 10 + digit;
+        }
+        *out = result;
         return true;
     }
 
