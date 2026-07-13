@@ -22,6 +22,7 @@
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/window_diff/window_matcher.cpp",
         "HDiffPatch/libHDiffPatch/HPatchLite/hpatch_lite.c",
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/match_inplace.cpp",
+        "lzma/C/7zStream.c",
         "lzma/C/CpuArch.c",
         "lzma/C/LzFind.c",
         "lzma/C/LzFindMt.c",
@@ -31,6 +32,7 @@
         "lzma/C/Lzma2Dec.c",
         "lzma/C/Lzma2Enc.c",
         "lzma/C/MtCoder.c",
+        "lzma/C/MtDec.c",
         "lzma/C/Threads.c"
       ],
       "defines": [
