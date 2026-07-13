@@ -15,7 +15,9 @@ jobs:
           - ubuntu-24.04-arm
           - macos-15-intel
           - macos-latest
-          - windows-latest
+          # Windows prebuild is temporarily unsupported; keep it out of CI
+          # until a Windows runtime is needed by a production consumer.
+          # - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -27,9 +29,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      # bun 在 Windows 上生成 exe shim,而 prebuildify 硬编码 spawn node-gyp.cmd
-      - if: runner.os == 'Windows'
-        run: npm install -g node-gyp
+      # Windows-only node-gyp setup stays disabled with the Windows matrix.
+      # - if: runner.os == 'Windows'
+      #   run: npm install -g node-gyp
       - run: bun install --ignore-scripts
       - run: bun run prebuild
       - run: node test/test.js
