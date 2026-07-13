@@ -9,15 +9,23 @@ const hdiffpatch = require('..');
 if (process.env.HDIFF_MT_CHILD === '1') {
   const [oldPath, newPath, outPath, rawThreads] = process.argv.slice(2);
   const compressionThreads = Number(rawThreads);
+  const cpuStartedAt = process.cpuUsage();
   const startedAt = performance.now();
   hdiffpatch.diffWindow(oldPath, newPath, outPath, {
     windowSize: 8 * 1024 * 1024,
     compressionThreads,
   });
+  const durationMs = performance.now() - startedAt;
+  const cpuUsage = process.cpuUsage(cpuStartedAt);
+  const cpuTotalMs = (cpuUsage.user + cpuUsage.system) / 1000;
   const patch = fs.readFileSync(outPath);
   console.log(JSON.stringify({
     compressionThreads,
-    durationMs: performance.now() - startedAt,
+    cpuPercent: (cpuTotalMs / durationMs) * 100,
+    cpuSystemMs: cpuUsage.system / 1000,
+    cpuTotalMs,
+    cpuUserMs: cpuUsage.user / 1000,
+    durationMs,
     maxRSSKiB: process.resourceUsage().maxRSS,
     patchBytes: patch.length,
     patchSha256: crypto.createHash('sha256').update(patch).digest('hex'),
@@ -93,6 +101,10 @@ try {
     );
     return {
       compressionThreads,
+      cpuPercent: samples.reduce((sum, sample) => sum + sample.cpuPercent, 0) /
+        samples.length,
+      cpuTotalMs: samples.reduce((sum, sample) => sum + sample.cpuTotalMs, 0) /
+        samples.length,
       durationMs: samples.reduce((sum, sample) => sum + sample.durationMs, 0) /
         samples.length,
       maxRSSKiB: Math.max(...samples.map((sample) => sample.maxRSSKiB)),
