@@ -22,6 +22,13 @@ function assertHeaderPrefix(diffData, prefix) {
   assert.deepStrictEqual(diffData.subarray(0, expected.length), expected);
 }
 
+assert.deepStrictEqual(hdiffpatch.capabilities, {
+  diffStreamVerifiesOutput: true,
+  diffSingleStreamVerifiesOutput: true,
+  diffWindowVerifiesOutput: true
+});
+assert(Object.isFrozen(hdiffpatch.capabilities));
+
 console.log("Test 1: diff + patch = original (sync)...");
 var oldData = crypto.randomBytes(40960);
 var newData = Buffer.concat([

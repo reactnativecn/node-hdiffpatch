@@ -38,3 +38,12 @@ exports.patchStream = native.patchStream;
 exports.diffSingleStream = native.diffSingleStream;
 exports.patchSingleStream = native.patchSingleStream;
 exports.diffWindow = native.diffWindow;
+
+// Every native diff entry point performs a complete apply-and-compare check
+// before returning. Consumers that would otherwise repeat the same round trip
+// can use these explicit capabilities to safely avoid duplicate work.
+exports.capabilities = Object.freeze({
+  diffStreamVerifiesOutput: true,
+  diffSingleStreamVerifiesOutput: true,
+  diffWindowVerifiesOutput: true,
+});

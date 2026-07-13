@@ -61,6 +61,15 @@ export interface NativeAddon {
 
 export const native: NativeAddon;
 
+export interface HdiffpatchCapabilities {
+  readonly diffStreamVerifiesOutput: true;
+  readonly diffSingleStreamVerifiesOutput: true;
+  readonly diffWindowVerifiesOutput: true;
+}
+
+/** Native diff functions apply and compare their output before returning. */
+export const capabilities: HdiffpatchCapabilities;
+
 export function diff(oldBuf: BinaryLike, newBuf: BinaryLike): Buffer;
 export function diff(
   oldBuf: BinaryLike,
@@ -147,6 +156,7 @@ export function diffWindow(
 
 declare const hdiffpatch: {
   native: NativeAddon;
+  capabilities: HdiffpatchCapabilities;
   diff: typeof diff;
   patch: typeof patch;
   diffStream: typeof diffStream;

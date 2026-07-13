@@ -60,6 +60,14 @@ returns `outDiffPath`; async callback signature is `(err, outDiffPath)`.
 a larger window catches longer-distance content moves at roughly linear
 additional memory.
 
+### capabilities
+
+`capabilities.diffStreamVerifiesOutput`,
+`capabilities.diffSingleStreamVerifiesOutput`, and
+`capabilities.diffWindowVerifiesOutput` are `true`. Each native diff function
+applies and compares the generated patch before it returns, so orchestration
+layers can avoid running a redundant second round-trip check.
+
 ### patchSingleStream(oldPath, diffPath, outNewPath[, cb])
 
 Apply a single-compressed hpatch payload created by `diff` or
