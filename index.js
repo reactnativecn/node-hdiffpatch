@@ -46,4 +46,5 @@ exports.capabilities = Object.freeze({
   diffStreamVerifiesOutput: true,
   diffSingleStreamVerifiesOutput: true,
   diffWindowVerifiesOutput: true,
+  maxCompressionThreads: 2,
 });

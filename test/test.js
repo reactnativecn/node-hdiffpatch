@@ -25,7 +25,8 @@ function assertHeaderPrefix(diffData, prefix) {
 assert.deepStrictEqual(hdiffpatch.capabilities, {
   diffStreamVerifiesOutput: true,
   diffSingleStreamVerifiesOutput: true,
-  diffWindowVerifiesOutput: true
+  diffWindowVerifiesOutput: true,
+  maxCompressionThreads: 2
 });
 assert(Object.isFrozen(hdiffpatch.capabilities));
 
@@ -125,6 +126,21 @@ assertHeaderPrefix(compressibleDiff, "HDIFFSF20&lzma2\x00");
 assert.deepStrictEqual(hdiffpatch.patch(compressibleOld, compressibleDiff), compressibleNew);
 console.log("  ✓ lzma2 label remains when compression is used");
 
+console.log("\nTest 5aa: optional LZMA2 compression threads...");
+var mtOld = deterministicBytes(2 * 1024 * 1024, 0x2468ace0);
+var mtNew = Buffer.from(mtOld);
+for (var mtIndex = 0; mtIndex < mtNew.length; mtIndex += 4096) {
+  mtNew[mtIndex] ^= (mtIndex >>> 12) & 0xff;
+}
+var mtDiffSingle = hdiffpatch.diff(mtOld, mtNew, { compressionThreads: 1 });
+var mtDiffDual = hdiffpatch.diff(mtOld, mtNew, { compressionThreads: 2 });
+assert.deepStrictEqual(hdiffpatch.patch(mtOld, mtDiffDual), mtNew);
+assert.deepStrictEqual(mtDiffDual, mtDiffSingle);
+assert.throws(() => hdiffpatch.diff(mtOld, mtNew, { compressionThreads: 0 }));
+assert.throws(() => hdiffpatch.diff(mtOld, mtNew, { compressionThreads: 3 }));
+assert.throws(() => hdiffpatch.diff(mtOld, mtNew, { compressionThreads: 1.5 }));
+console.log("  ✓ 1/2 threads are deterministic; invalid counts are rejected");
+
 console.log("\nTest 5b: diffSingleStream (single format, low-memory generation)...");
 var ssDir = fs.mkdtempSync(path.join(os.tmpdir(), "hdiffpatch-ss-"));
 var ssOldPath = path.join(ssDir, "old.bin");
@@ -138,6 +154,11 @@ assert.strictEqual(ssDiffOut, ssDiffPath);
 var ssDiffData = fs.readFileSync(ssDiffPath);
 // 产物是 single 格式:内存版 patch() 能直接应用(与 diff() 产物同规范)
 assert.deepStrictEqual(hdiffpatch.patch(oldData, ssDiffData), newData);
+var ssMtDiffPath = path.join(ssDir, "diff-mt.bin");
+hdiffpatch.diffSingleStream(ssOldPath, ssNewPath, ssMtDiffPath, {
+  compressionThreads: 2
+});
+assert.deepStrictEqual(hdiffpatch.patch(oldData, fs.readFileSync(ssMtDiffPath)), newData);
 // 文件版 patchSingleStream 也能应用
 hdiffpatch.patchSingleStream(ssOldPath, ssDiffPath, ssOutPath);
 assert.deepStrictEqual(fs.readFileSync(ssOutPath), newData);
@@ -170,6 +191,12 @@ var winDiff8Data = fs.readFileSync(winDiff8Path);
 assert.strictEqual(winDiff8Data.slice(0, 9).toString("latin1"), "HDIFFSF20");
 assert.deepStrictEqual(hdiffpatch.patch(oldData, winDiff8Data), newData);
 assert.throws(() => hdiffpatch.diffWindow(ssOldPath, ssNewPath, winDiff8Path, -1));
+var winDiffMtPath = path.join(ssDir, "win-mt.diff");
+hdiffpatch.diffWindow(ssOldPath, ssNewPath, winDiffMtPath, {
+  windowSize: 8 * 1024 * 1024,
+  compressionThreads: 2
+});
+assert.deepStrictEqual(hdiffpatch.patch(oldData, fs.readFileSync(winDiffMtPath)), newData);
 console.log("  ✓ diffWindow with explicit windowSize works, invalid size throws");
 
 console.log("\nTest 6: Single-compressed patchSingleStream (file paths)...");
@@ -196,6 +223,8 @@ console.log("\nTest 7: Stream diff/patch (file paths)...");
 
 var diffOutPath = hdiffpatch.diffStream(oldPath, newPath, diffPath);
 assert.strictEqual(diffOutPath, diffPath);
+var mtStreamDiffPath = path.join(tempDir, "stream-mt.diff");
+hdiffpatch.diffStream(oldPath, newPath, mtStreamDiffPath, { compressionThreads: 2 });
 var patchedOutPath = hdiffpatch.patchStream(oldPath, diffPath, outNewPath);
 assert.strictEqual(patchedOutPath, outNewPath);
 
@@ -210,6 +239,7 @@ var diffAsync = util.promisify(hdiffpatch.diff);
 var patchAsync = util.promisify(hdiffpatch.patch);
 var diffStreamAsync = util.promisify(hdiffpatch.diffStream);
 var patchStreamAsync = util.promisify(hdiffpatch.patchStream);
+var diffSingleStreamAsync = util.promisify(hdiffpatch.diffSingleStream);
 var patchSingleStreamAsync = util.promisify(hdiffpatch.patchSingleStream);
 var diffWindowAsync = util.promisify(hdiffpatch.diffWindow);
 
@@ -220,6 +250,8 @@ async function runAsyncTests() {
   assert.deepStrictEqual(asyncDiff, diffResult);
   var asyncPatched = await patchAsync(oldData, asyncDiff);
   assert.deepStrictEqual(asyncPatched, newData);
+  var asyncMtDiff = await diffAsync(oldData, newData, { compressionThreads: 2 });
+  assert.deepStrictEqual(await patchAsync(oldData, asyncMtDiff), newData);
   console.log("  ✓ Async diff/patch works");
 
   console.log("\nTest 9: Async error propagation...");
@@ -233,6 +265,21 @@ async function runAsyncTests() {
   var asyncOutPath = path.join(tempDir, "async-out.bin");
   var asyncSingleOutPath = path.join(tempDir, "async-single-out.bin");
   assert.strictEqual(await diffStreamAsync(oldPath, newPath, asyncDiffPath), asyncDiffPath);
+  var asyncMtDiffPath = path.join(tempDir, "async-mt.diff");
+  assert.strictEqual(
+    await diffStreamAsync(oldPath, newPath, asyncMtDiffPath, { compressionThreads: 2 }),
+    asyncMtDiffPath
+  );
+  var asyncMtSinglePath = path.join(tempDir, "async-mt-single.diff");
+  assert.strictEqual(
+    await diffSingleStreamAsync(
+      oldPath,
+      newPath,
+      asyncMtSinglePath,
+      { compressionThreads: 2 }
+    ),
+    asyncMtSinglePath
+  );
   assert.strictEqual(await patchStreamAsync(oldPath, asyncDiffPath, asyncOutPath), asyncOutPath);
   assert.deepStrictEqual(fs.readFileSync(asyncOutPath), newData);
   assert.strictEqual(

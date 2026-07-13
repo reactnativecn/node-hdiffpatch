@@ -38,6 +38,63 @@ namespace hdiffpatchNode
         return true;
     }
 
+    struct NativeDiffOptions {
+        size_t compressionThreads = 1;
+        size_t windowSize = 0;
+    };
+
+    inline bool parseIntegerOption(const Napi::Value& value,
+                                   size_t minimum,
+                                   size_t maximum,
+                                   size_t& out) {
+        if (!value.IsNumber()) return false;
+        const double raw = value.As<Napi::Number>().DoubleValue();
+        if (!std::isfinite(raw) || std::floor(raw) != raw ||
+            raw < static_cast<double>(minimum) ||
+            raw > static_cast<double>(maximum)) {
+            return false;
+        }
+        out = static_cast<size_t>(raw);
+        return true;
+    }
+
+    inline bool parseDiffOptions(Napi::Env env,
+                                 const Napi::Value& value,
+                                 bool allowWindowSize,
+                                 NativeDiffOptions& out) {
+        if (!value.IsObject() || value.IsFunction()) {
+            Napi::TypeError::New(env, "Invalid diff options: expected an object.")
+                .ThrowAsJavaScriptException();
+            return false;
+        }
+        Napi::Object options = value.As<Napi::Object>();
+        if (options.Has("compressionThreads")) {
+            size_t threads = 0;
+            if (!parseIntegerOption(options.Get("compressionThreads"), 1, 2, threads)) {
+                Napi::TypeError::New(env, "Invalid compressionThreads: expected 1 or 2.")
+                    .ThrowAsJavaScriptException();
+                return false;
+            }
+            out.compressionThreads = threads;
+        }
+        if (options.Has("windowSize")) {
+            if (!allowWindowSize) {
+                Napi::TypeError::New(env, "windowSize is only supported by diffWindow().")
+                    .ThrowAsJavaScriptException();
+                return false;
+            }
+            size_t windowSize = 0;
+            if (!parseIntegerOption(options.Get("windowSize"), 0,
+                                    std::numeric_limits<size_t>::max(), windowSize)) {
+                Napi::TypeError::New(env, "Invalid windowSize: expected a non-negative integer.")
+                    .ThrowAsJavaScriptException();
+                return false;
+            }
+            out.windowSize = windowSize;
+        }
+        return true;
+    }
+
     inline Napi::Buffer<uint8_t> bufferFromVector(Napi::Env env, std::vector<uint8_t>&& data) {
         if (data.empty()) {
             return Napi::Buffer<uint8_t>::New(env, 0);
@@ -59,12 +116,14 @@ namespace hdiffpatchNode
     public:
         DiffAsyncWorker(Napi::Function& callback,
                         const Napi::Value& oldValue, const uint8_t* oldData, size_t oldLen,
-                        const Napi::Value& newValue, const uint8_t* newData, size_t newLen)
+                        const Napi::Value& newValue, const uint8_t* newData, size_t newLen,
+                        size_t compressionThreads)
             : Napi::AsyncWorker(callback),
               oldData_(oldData),
               oldLen_(oldLen),
               newData_(newData),
               newLen_(newLen),
+              compressionThreads_(compressionThreads),
               oldRef_(Napi::Persistent(oldValue)),
               newRef_(Napi::Persistent(newValue)) {
         }
@@ -72,7 +131,7 @@ namespace hdiffpatchNode
         void Execute() override {
             try {
                 hdiff(oldData_, oldLen_,
-                      newData_, newLen_, result_);
+                      newData_, newLen_, result_, compressionThreads_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -100,6 +159,7 @@ namespace hdiffpatchNode
         size_t oldLen_;
         const uint8_t* newData_;
         size_t newLen_;
+        size_t compressionThreads_;
         Napi::Reference<Napi::Value> oldRef_;
         Napi::Reference<Napi::Value> newRef_;
         std::vector<uint8_t> result_;
@@ -162,16 +222,19 @@ namespace hdiffpatchNode
         DiffStreamAsyncWorker(Napi::Function& callback,
                               std::string oldPath,
                               std::string newPath,
-                              std::string outDiffPath)
+                              std::string outDiffPath,
+                              size_t compressionThreads)
             : Napi::AsyncWorker(callback),
               oldPath_(std::move(oldPath)),
               newPath_(std::move(newPath)),
-              outDiffPath_(std::move(outDiffPath)) {
+              outDiffPath_(std::move(outDiffPath)),
+              compressionThreads_(compressionThreads) {
         }
 
         void Execute() override {
             try {
-                hdiff_stream(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str());
+                hdiff_stream(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str(),
+                             compressionThreads_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -193,6 +256,7 @@ namespace hdiffpatchNode
         std::string oldPath_;
         std::string newPath_;
         std::string outDiffPath_;
+        size_t compressionThreads_;
     };
 
     // ============ 异步 Stream Patch Worker ============
@@ -279,16 +343,19 @@ namespace hdiffpatchNode
         DiffSingleStreamAsyncWorker(Napi::Function& callback,
                                     std::string oldPath,
                                     std::string newPath,
-                                    std::string outDiffPath)
+                                    std::string outDiffPath,
+                                    size_t compressionThreads)
             : Napi::AsyncWorker(callback),
               oldPath_(std::move(oldPath)),
               newPath_(std::move(newPath)),
-              outDiffPath_(std::move(outDiffPath)) {
+              outDiffPath_(std::move(outDiffPath)),
+              compressionThreads_(compressionThreads) {
         }
 
         void Execute() override {
             try {
-                hdiff_single_stream(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str());
+                hdiff_single_stream(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str(),
+                                    compressionThreads_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -310,6 +377,7 @@ namespace hdiffpatchNode
         std::string oldPath_;
         std::string newPath_;
         std::string outDiffPath_;
+        size_t compressionThreads_;
     };
 
     // ============ 同步/异步 diff ============
@@ -329,11 +397,21 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
+        NativeDiffOptions options;
+        size_t argIdx = 2;
+        if (info.Length() > argIdx && !info[argIdx].IsFunction()) {
+            if (!parseDiffOptions(env, info[argIdx], false, options)) {
+                return env.Undefined();
+            }
+            argIdx++;
+        }
+
         // 如果提供了回调函数，使用异步模式
-        if (info.Length() > 2 && info[2].IsFunction()) {
-            Napi::Function callback = info[2].As<Napi::Function>();
+        if (info.Length() > argIdx && info[argIdx].IsFunction()) {
+            Napi::Function callback = info[argIdx].As<Napi::Function>();
             DiffAsyncWorker* worker = new DiffAsyncWorker(
-                callback, info[0], oldData, oldLength, info[1], newData, newLength
+                callback, info[0], oldData, oldLength, info[1], newData, newLength,
+                options.compressionThreads
             );
             worker->Queue();
             return env.Undefined();
@@ -342,7 +420,8 @@ namespace hdiffpatchNode
         // 同步模式
         std::vector<uint8_t> codeBuf;
         try {
-            hdiff(oldData, oldLength, newData, newLength, codeBuf);
+            hdiff(oldData, oldLength, newData, newLength, codeBuf,
+                  options.compressionThreads);
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();
@@ -412,17 +491,27 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
-        if (info.Length() > 3 && info[3].IsFunction()) {
-            Napi::Function callback = info[3].As<Napi::Function>();
+        NativeDiffOptions options;
+        size_t argIdx = 3;
+        if (info.Length() > argIdx && !info[argIdx].IsFunction()) {
+            if (!parseDiffOptions(env, info[argIdx], false, options)) {
+                return env.Undefined();
+            }
+            argIdx++;
+        }
+
+        if (info.Length() > argIdx && info[argIdx].IsFunction()) {
+            Napi::Function callback = info[argIdx].As<Napi::Function>();
             DiffStreamAsyncWorker* worker = new DiffStreamAsyncWorker(
-                callback, oldPath, newPath, outDiffPath
+                callback, oldPath, newPath, outDiffPath, options.compressionThreads
             );
             worker->Queue();
             return env.Undefined();
         }
 
         try {
-            hdiff_stream(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str());
+            hdiff_stream(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str(),
+                         options.compressionThreads);
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();
@@ -473,18 +562,20 @@ namespace hdiffpatchNode
                               std::string oldPath,
                               std::string newPath,
                               std::string outDiffPath,
-                              size_t windowSize)
+                              size_t windowSize,
+                              size_t compressionThreads)
             : Napi::AsyncWorker(callback),
               oldPath_(std::move(oldPath)),
               newPath_(std::move(newPath)),
               outDiffPath_(std::move(outDiffPath)),
-              windowSize_(windowSize) {
+              windowSize_(windowSize),
+              compressionThreads_(compressionThreads) {
         }
 
         void Execute() override {
             try {
                 hdiff_window(oldPath_.c_str(), newPath_.c_str(), outDiffPath_.c_str(),
-                             windowSize_);
+                             windowSize_, compressionThreads_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -507,6 +598,7 @@ namespace hdiffpatchNode
         std::string newPath_;
         std::string outDiffPath_;
         size_t windowSize_;
+        size_t compressionThreads_;
     };
 
     // ============ 同步/异步 diffSingleStream ============
@@ -527,17 +619,27 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
-        if (info.Length() > 3 && info[3].IsFunction()) {
-            Napi::Function callback = info[3].As<Napi::Function>();
+        NativeDiffOptions options;
+        size_t argIdx = 3;
+        if (info.Length() > argIdx && !info[argIdx].IsFunction()) {
+            if (!parseDiffOptions(env, info[argIdx], false, options)) {
+                return env.Undefined();
+            }
+            argIdx++;
+        }
+
+        if (info.Length() > argIdx && info[argIdx].IsFunction()) {
+            Napi::Function callback = info[argIdx].As<Napi::Function>();
             DiffSingleStreamAsyncWorker* worker = new DiffSingleStreamAsyncWorker(
-                callback, oldPath, newPath, outDiffPath
+                callback, oldPath, newPath, outDiffPath, options.compressionThreads
             );
             worker->Queue();
             return env.Undefined();
         }
 
         try {
-            hdiff_single_stream(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str());
+            hdiff_single_stream(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str(),
+                                options.compressionThreads);
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();
@@ -568,31 +670,40 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
-        size_t windowSize = 0;  // 0 = 使用默认窗口(2MB)
+        NativeDiffOptions options;
         size_t argIdx = 3;
         if (info.Length() > argIdx && info[argIdx].IsNumber()) {
             double raw = info[argIdx].As<Napi::Number>().DoubleValue();
-            if (!std::isfinite(raw) || raw < 0 ||
+            if (!std::isfinite(raw) || std::floor(raw) != raw || raw < 0 ||
                 raw > static_cast<double>(std::numeric_limits<size_t>::max())) {
                 Napi::TypeError::New(env, "Invalid windowSize: expected a non-negative integer.")
                     .ThrowAsJavaScriptException();
                 return env.Undefined();
             }
-            windowSize = static_cast<size_t>(raw);
+            options.windowSize = static_cast<size_t>(raw);
+            argIdx++;
+        }
+
+        if (info.Length() > argIdx && !info[argIdx].IsFunction()) {
+            if (!parseDiffOptions(env, info[argIdx], true, options)) {
+                return env.Undefined();
+            }
             argIdx++;
         }
 
         if (info.Length() > argIdx && info[argIdx].IsFunction()) {
             Napi::Function callback = info[argIdx].As<Napi::Function>();
             DiffWindowAsyncWorker* worker = new DiffWindowAsyncWorker(
-                callback, oldPath, newPath, outDiffPath, windowSize
+                callback, oldPath, newPath, outDiffPath, options.windowSize,
+                options.compressionThreads
             );
             worker->Queue();
             return env.Undefined();
         }
 
         try {
-            hdiff_window(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str(), windowSize);
+            hdiff_window(oldPath.c_str(), newPath.c_str(), outDiffPath.c_str(),
+                         options.windowSize, options.compressionThreads);
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();

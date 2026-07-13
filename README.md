@@ -31,9 +31,15 @@ bun run test:bun   # run the same tests under the Bun runtime
 
 ## Usage
 
-### diff(originBuf, newBuf)
+### diff(originBuf, newBuf[, options])
 
 Compare two buffers and return a new hdiffpatch patch as return value.
+
+All diff entry points accept an optional `options` object with
+`compressionThreads: 1 | 2`. Two threads enable LZMA's internal parallel
+match finder while preserving compression level 9 and the 8 MiB dictionary.
+The default remains one thread. `diffWindow()` also accepts `windowSize` in
+the options object; the legacy positional `windowSize` remains supported.
 
 ### diffSingleStream(oldPath, newPath, outDiffPath[, cb])
 
@@ -67,6 +73,7 @@ additional memory.
 `capabilities.diffWindowVerifiesOutput` are `true`. Each native diff function
 applies and compares the generated patch before it returns, so orchestration
 layers can avoid running a redundant second round-trip check.
+`capabilities.maxCompressionThreads` is `2`.
 
 ### patchSingleStream(oldPath, diffPath, outNewPath[, cb])
 

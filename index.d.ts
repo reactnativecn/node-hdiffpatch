@@ -5,9 +5,26 @@ export type BinaryLike = Buffer | ArrayBufferView;
 export type DiffCallback = (err: Error | null, result?: Buffer) => void;
 export type StreamCallback = (err: Error | null, outPath?: string) => void;
 
+export interface CompressionOptions {
+  /** LZMA2 compression workers. Level 9 and the 8 MiB dictionary are unchanged. */
+  compressionThreads?: 1 | 2;
+}
+
+export interface DiffWindowOptions extends CompressionOptions {
+  /** Old-data sliding window bytes; 0 uses the native 2 MiB default. */
+  windowSize?: number;
+}
+
 export interface NativeAddon {
   diff(oldBuf: BinaryLike, newBuf: BinaryLike): Buffer;
+  diff(oldBuf: BinaryLike, newBuf: BinaryLike, options: CompressionOptions): Buffer;
   diff(oldBuf: BinaryLike, newBuf: BinaryLike, cb: DiffCallback): void;
+  diff(
+    oldBuf: BinaryLike,
+    newBuf: BinaryLike,
+    options: CompressionOptions,
+    cb: DiffCallback
+  ): void;
   patch(oldBuf: BinaryLike, diffBuf: BinaryLike): Buffer;
   patch(oldBuf: BinaryLike, diffBuf: BinaryLike, cb: DiffCallback): void;
   diffStream(oldPath: string, newPath: string, outDiffPath: string): string;
@@ -15,6 +32,19 @@ export interface NativeAddon {
     oldPath: string,
     newPath: string,
     outDiffPath: string,
+    options: CompressionOptions
+  ): string;
+  diffStream(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    cb: StreamCallback
+  ): void;
+  diffStream(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    options: CompressionOptions,
     cb: StreamCallback
   ): void;
   patchStream(oldPath: string, diffPath: string, outNewPath: string): string;
@@ -29,6 +59,19 @@ export interface NativeAddon {
     oldPath: string,
     newPath: string,
     outDiffPath: string,
+    options: CompressionOptions
+  ): string;
+  diffSingleStream(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    cb: StreamCallback,
+  ): void;
+  diffSingleStream(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    options: CompressionOptions,
     cb: StreamCallback,
   ): void;
   patchSingleStream(oldPath: string, diffPath: string, outNewPath: string): string;
@@ -48,6 +91,19 @@ export interface NativeAddon {
     oldPath: string,
     newPath: string,
     outDiffPath: string,
+    options: DiffWindowOptions
+  ): string;
+  diffWindow(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    cb: StreamCallback
+  ): void;
+  diffWindow(
+    oldPath: string,
+    newPath: string,
+    outDiffPath: string,
+    options: DiffWindowOptions,
     cb: StreamCallback
   ): void;
   diffWindow(
@@ -65,6 +121,7 @@ export interface HdiffpatchCapabilities {
   readonly diffStreamVerifiesOutput: true;
   readonly diffSingleStreamVerifiesOutput: true;
   readonly diffWindowVerifiesOutput: true;
+  readonly maxCompressionThreads: 2;
 }
 
 /** Native diff functions apply and compare their output before returning. */
@@ -74,6 +131,17 @@ export function diff(oldBuf: BinaryLike, newBuf: BinaryLike): Buffer;
 export function diff(
   oldBuf: BinaryLike,
   newBuf: BinaryLike,
+  options: CompressionOptions
+): Buffer;
+export function diff(
+  oldBuf: BinaryLike,
+  newBuf: BinaryLike,
+  cb: DiffCallback
+): void;
+export function diff(
+  oldBuf: BinaryLike,
+  newBuf: BinaryLike,
+  options: CompressionOptions,
   cb: DiffCallback
 ): void;
 
@@ -93,6 +161,19 @@ export function diffStream(
   oldPath: string,
   newPath: string,
   outDiffPath: string,
+  options: CompressionOptions
+): string;
+export function diffStream(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string,
+  cb: StreamCallback
+): void;
+export function diffStream(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string,
+  options: CompressionOptions,
   cb: StreamCallback
 ): void;
 
@@ -116,6 +197,19 @@ export function diffSingleStream(
   oldPath: string,
   newPath: string,
   outDiffPath: string,
+  options: CompressionOptions,
+): string;
+export function diffSingleStream(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string,
+  cb: StreamCallback,
+): void;
+export function diffSingleStream(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string,
+  options: CompressionOptions,
   cb: StreamCallback,
 ): void;
 export function patchSingleStream(
@@ -144,6 +238,19 @@ export function diffWindow(
   oldPath: string,
   newPath: string,
   outDiffPath: string,
+  options: DiffWindowOptions
+): string;
+export function diffWindow(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string,
+  cb: StreamCallback
+): void;
+export function diffWindow(
+  oldPath: string,
+  newPath: string,
+  outDiffPath: string,
+  options: DiffWindowOptions,
   cb: StreamCallback
 ): void;
 export function diffWindow(

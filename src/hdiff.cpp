@@ -10,19 +10,28 @@
 #define IS_NOTICE_compress_canceled 0
 #include "../lzma/C/Lzma2Dec.h"
 #include "../lzma/C/Lzma2Enc.h"
-#include "../lzma/C/MtCoder.h"
+// The public API deliberately caps LZMA's internal match-finder parallelism
+// at two workers, so the C++ wrapper only needs the compressor's bound here.
+// MtCoder itself is compiled as C from binding.gyp.
+#define MTCODER_THREADS_MAX 2
 #include "../HDiffPatch/compress_plugin_demo.h"
 #include "../HDiffPatch/decompress_plugin_demo.h"
 
 namespace {
     // 与 v1.0.6 起的历史产物保持一致的压缩参数(patch 兼容性由 single
     // 格式规范保证,这里的一致性只为产物尺寸/确定性稳定)
-    void configure_lzma2(TCompressPlugin_lzma2& compressPlugin) {
+    void configure_lzma2(TCompressPlugin_lzma2& compressPlugin,
+                         size_t compressionThreads) {
+        if (compressionThreads < 1 || compressionThreads > 2) {
+            throw std::runtime_error("compressionThreads must be 1 or 2.");
+        }
         const size_t myBestDictSize = (1 << 20) * 8;  // 固定 8MB
         compressPlugin = lzma2CompressPlugin;
         compressPlugin.compress_level = 9;
         compressPlugin.dict_size = myBestDictSize;
-        compressPlugin.thread_num = 1;
+        // 2 线程只启用 LZMA 内部并行匹配,不切 LZMA2 block,避免额外的
+        // block 级内存放大。压缩级别和字典保持历史值不变。
+        compressPlugin.thread_num = static_cast<int>(compressionThreads);
     }
 
     // 升级到 HDiffPatch v5 前的历史参数:匹配分 3、步进内存 256KB。
@@ -255,10 +264,10 @@ namespace {
 }
 
 void hdiff(const uint8_t* old, size_t oldsize, const uint8_t* _new, size_t newsize,
-           std::vector<uint8_t>& out_codeBuf) {
+           std::vector<uint8_t>& out_codeBuf, size_t compressionThreads) {
     hpatch_TDecompress* decompressPlugin = &lzma2DecompressPlugin;
     TCompressPlugin_lzma2 compressPlugin;
-    configure_lzma2(compressPlugin);
+    configure_lzma2(compressPlugin, compressionThreads);
 
     create_single_compressed_diff(_new, _new + newsize, old, old + oldsize, out_codeBuf,
                                   &compressPlugin.base, kPatchStepMemSize,
@@ -273,14 +282,15 @@ void hdiff(const uint8_t* old, size_t oldsize, const uint8_t* _new, size_t newsi
     }
 }
 
-void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPath){
+void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPath,
+                  size_t compressionThreads){
     if (!oldPath || !newPath || !outDiffPath) {
         throw std::runtime_error("Invalid file path.");
     }
 
     hpatch_TDecompress* decompressPlugin = &lzma2DecompressPlugin;
     TCompressPlugin_lzma2 compressPlugin;
-    configure_lzma2(compressPlugin);
+    configure_lzma2(compressPlugin, compressionThreads);
 
     FileStreamGuard streams;
     streams.openInputs(oldPath, newPath);
@@ -300,14 +310,14 @@ void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPat
 }
 
 void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPath,
-                  size_t windowSize){
+                  size_t windowSize,size_t compressionThreads){
     if (!oldPath || !newPath || !outDiffPath) {
         throw std::runtime_error("Invalid file path.");
     }
 
     hpatch_TDecompress* decompressPlugin = &lzma2DecompressPlugin;
     TCompressPlugin_lzma2 compressPlugin;
-    configure_lzma2(compressPlugin);
+    configure_lzma2(compressPlugin, compressionThreads);
 
     FileStreamGuard streams;
     streams.openInputs(oldPath, newPath);
@@ -336,14 +346,15 @@ void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPat
     streams.closeAllOrThrow();
 }
 
-void hdiff_single_stream(const char* oldPath,const char* newPath,const char* outDiffPath){
+void hdiff_single_stream(const char* oldPath,const char* newPath,const char* outDiffPath,
+                         size_t compressionThreads){
     if (!oldPath || !newPath || !outDiffPath) {
         throw std::runtime_error("Invalid file path.");
     }
 
     hpatch_TDecompress* decompressPlugin = &lzma2DecompressPlugin;
     TCompressPlugin_lzma2 compressPlugin;
-    configure_lzma2(compressPlugin);
+    configure_lzma2(compressPlugin, compressionThreads);
 
     FileStreamGuard streams;
     streams.openInputs(oldPath, newPath);

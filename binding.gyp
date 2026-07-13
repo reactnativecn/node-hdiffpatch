@@ -24,15 +24,17 @@
         "HDiffPatch/libHDiffPatch/HDiff/private_diff/match_inplace.cpp",
         "lzma/C/CpuArch.c",
         "lzma/C/LzFind.c",
+        "lzma/C/LzFindMt.c",
+        "lzma/C/LzFindOpt.c",
         "lzma/C/LzmaDec.c",
         "lzma/C/LzmaEnc.c",
         "lzma/C/Lzma2Dec.c",
-        "lzma/C/Lzma2Enc.c"
+        "lzma/C/Lzma2Enc.c",
+        "lzma/C/MtCoder.c",
+        "lzma/C/Threads.c"
       ],
       "defines": [
         "_IS_NEED_DIR_DIFF_PATCH=0",
-        "_7ZIP_ST",
-        "Z7_ST",
         "_IS_USED_MULTITHREAD=0",
         "_IS_OUT_DIFF_INFO=0",
         "NAPI_VERSION=8"

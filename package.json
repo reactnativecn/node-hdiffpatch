@@ -18,6 +18,7 @@
     "test:bun": "bun ./test/test.js",
     "prepublishOnly": "bun scripts/prepublish.ts",
     "benchmark": "node --expose-gc test/benchmark.js",
+    "benchmark:threads": "node test/benchmark-threads.js",
     "prebuild": "prebuildify --napi --strip"
   },
   "gypfile": true,
