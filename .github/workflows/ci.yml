@@ -13,8 +13,9 @@ jobs:
         os:
           - ubuntu-latest
           - ubuntu-24.04-arm
-          - macos-15-intel
           - macos-latest
+          # macOS x64 prebuild is temporarily unsupported.
+          # - macos-15-intel
           # Windows prebuild is temporarily unsupported; keep it out of CI
           # until a Windows runtime is needed by a production consumer.
           # - windows-latest

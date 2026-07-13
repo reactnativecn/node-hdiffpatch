@@ -17,10 +17,11 @@ jobs:
             arch: x64
           - os: ubuntu-24.04-arm
             arch: arm64
-          - os: macos-15-intel
-            arch: x64
           - os: macos-latest
             arch: arm64
+          # macOS x64 prebuild publication is temporarily disabled.
+          # - os: macos-15-intel
+          #   arch: x64
           # Windows prebuild publication is temporarily disabled.
           # - os: windows-latest
           #   arch: x64
