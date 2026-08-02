@@ -14,8 +14,17 @@
 
 namespace hdiffpatchNode
 {
-    // Helper: 从参数获取数据指针和长度（支持 Buffer 和 TypedArray）
+    // Helper: 从参数获取数据指针和长度（支持 Buffer、TypedArray 和 DataView）
     inline bool getBufferData(const Napi::Value& arg, const uint8_t** data, size_t* length) {
+        // DataView 必须在 Buffer 之前判断:napi_is_buffer 对所有
+        // ArrayBufferView 返回 true,但 napi_get_buffer_info 只接受 Uint8Array
+        if (arg.IsDataView()) {
+            Napi::DataView dataView = arg.As<Napi::DataView>();
+            Napi::ArrayBuffer arrayBuffer = dataView.ArrayBuffer();
+            *data = static_cast<const uint8_t*>(arrayBuffer.Data()) + dataView.ByteOffset();
+            *length = dataView.ByteLength();
+            return true;
+        }
         if (arg.IsBuffer()) {
             Napi::Buffer<uint8_t> buf = arg.As<Napi::Buffer<uint8_t>>();
             *data = buf.Data();
@@ -32,6 +41,13 @@ namespace hdiffpatchNode
         return false;
     }
 
+    // 复制一份输入数据。异步 worker 在 libuv 线程上运行,期间 JS 侧仍可
+    // 修改 Buffer 内容甚至 transfer/detach 底层 ArrayBuffer;持有副本是
+    // 唯一不依赖调用方约定的安全做法。
+    inline std::vector<uint8_t> copyBufferData(const uint8_t* data, size_t length) {
+        return std::vector<uint8_t>(data, data + length);
+    }
+
     inline bool getStringUtf8(const Napi::Value& arg, std::string& out) {
         if (!arg.IsString()) return false;
         out = arg.As<Napi::String>().Utf8Value();
@@ -43,12 +59,24 @@ namespace hdiffpatchNode
         size_t windowSize = 0;
     };
 
+    // JS Number 只能精确表示 2^53-1 以内的整数;同时 double(SIZE_MAX) 在
+    // 64 位平台会舍入为 2^64,直接比较会放过 2^64 并触发浮点转无符号的
+    // 未定义行为。所有 Number → size_t 的解析统一收紧到两者较小值。
+    const uint64_t kMaxSafeIntegerBound =
+        (uint64_t)9007199254740991ull < (uint64_t)std::numeric_limits<size_t>::max()
+            ? (uint64_t)9007199254740991ull
+            : (uint64_t)std::numeric_limits<size_t>::max();
+
     inline bool parseIntegerOption(const Napi::Value& value,
                                    size_t minimum,
                                    size_t maximum,
                                    size_t& out) {
         if (!value.IsNumber()) return false;
+        if ((uint64_t)maximum > kMaxSafeIntegerBound) {
+            maximum = (size_t)kMaxSafeIntegerBound;
+        }
         const double raw = value.As<Napi::Number>().DoubleValue();
+        // minimum/maximum 均 <= 2^53-1,double 转换是精确的
         if (!std::isfinite(raw) || std::floor(raw) != raw ||
             raw < static_cast<double>(minimum) ||
             raw > static_cast<double>(maximum)) {
@@ -95,6 +123,52 @@ namespace hdiffpatchNode
         return true;
     }
 
+    // patch 侧资源上限,见 hpatch.h;maxOutputBytes 的默认值由调用点按
+    // 内存版/文件版分别注入
+    inline bool parsePatchOptions(Napi::Env env,
+                                  const Napi::Value& value,
+                                  HPatchLimits& out) {
+        if (!value.IsObject() || value.IsFunction()) {
+            Napi::TypeError::New(env, "Invalid patch options: expected an object.")
+                .ThrowAsJavaScriptException();
+            return false;
+        }
+        Napi::Object options = value.As<Napi::Object>();
+        if (options.Has("maxOutputBytes")) {
+            size_t maxOutput = 0;
+            if (!parseIntegerOption(options.Get("maxOutputBytes"), 1,
+                                    std::numeric_limits<size_t>::max(), maxOutput)) {
+                Napi::TypeError::New(env,
+                    "Invalid maxOutputBytes: expected a positive safe integer.")
+                    .ThrowAsJavaScriptException();
+                return false;
+            }
+            out.maxOutputBytes = maxOutput;
+        }
+        if (options.Has("maxWorkingMemoryBytes")) {
+            size_t maxWorkMem = 0;
+            if (!parseIntegerOption(options.Get("maxWorkingMemoryBytes"), 1,
+                                    std::numeric_limits<size_t>::max(), maxWorkMem)) {
+                Napi::TypeError::New(env,
+                    "Invalid maxWorkingMemoryBytes: expected a positive safe integer.")
+                    .ThrowAsJavaScriptException();
+                return false;
+            }
+            out.maxWorkingMemoryBytes = maxWorkMem;
+        }
+        return true;
+    }
+
+    inline HPatchLimits defaultPatchLimitsMem() {
+        return HPatchLimits{kDefaultMaxPatchOutputBytesMem,
+                            kDefaultMaxPatchWorkingMemoryBytes};
+    }
+
+    inline HPatchLimits defaultPatchLimitsFile() {
+        return HPatchLimits{kDefaultMaxPatchOutputBytesFile,
+                            kDefaultMaxPatchWorkingMemoryBytes};
+    }
+
     inline Napi::Buffer<uint8_t> bufferFromVector(Napi::Env env, std::vector<uint8_t>&& data) {
         if (data.empty()) {
             return Napi::Buffer<uint8_t>::New(env, 0);
@@ -112,26 +186,24 @@ namespace hdiffpatchNode
     }
 
     // ============ 异步 Diff Worker ============
+    // worker 持有输入数据的副本(排队前在主线程复制),因此调用方在回调
+    // 完成前修改、transfer 或 detach 原 Buffer 都不影响结果。
     class DiffAsyncWorker : public Napi::AsyncWorker {
     public:
         DiffAsyncWorker(Napi::Function& callback,
-                        const Napi::Value& oldValue, const uint8_t* oldData, size_t oldLen,
-                        const Napi::Value& newValue, const uint8_t* newData, size_t newLen,
+                        std::vector<uint8_t>&& oldData,
+                        std::vector<uint8_t>&& newData,
                         size_t compressionThreads)
             : Napi::AsyncWorker(callback),
-              oldData_(oldData),
-              oldLen_(oldLen),
-              newData_(newData),
-              newLen_(newLen),
-              compressionThreads_(compressionThreads),
-              oldRef_(Napi::Persistent(oldValue)),
-              newRef_(Napi::Persistent(newValue)) {
+              oldData_(std::move(oldData)),
+              newData_(std::move(newData)),
+              compressionThreads_(compressionThreads) {
         }
 
         void Execute() override {
             try {
-                hdiff(oldData_, oldLen_,
-                      newData_, newLen_, result_, compressionThreads_);
+                hdiff(oldData_.data(), oldData_.size(),
+                      newData_.data(), newData_.size(), result_, compressionThreads_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -142,26 +214,18 @@ namespace hdiffpatchNode
             Napi::HandleScope scope(env);
             Napi::Buffer<uint8_t> resultBuf = bufferFromVector(env, std::move(result_));
             Callback().Call({env.Null(), resultBuf});
-            oldRef_.Reset();
-            newRef_.Reset();
         }
 
         void OnError(const Napi::Error& e) override {
             Napi::Env env = Env();
             Napi::HandleScope scope(env);
             Callback().Call({e.Value()});
-            oldRef_.Reset();
-            newRef_.Reset();
         }
 
     private:
-        const uint8_t* oldData_;
-        size_t oldLen_;
-        const uint8_t* newData_;
-        size_t newLen_;
+        std::vector<uint8_t> oldData_;
+        std::vector<uint8_t> newData_;
         size_t compressionThreads_;
-        Napi::Reference<Napi::Value> oldRef_;
-        Napi::Reference<Napi::Value> newRef_;
         std::vector<uint8_t> result_;
     };
 
@@ -169,21 +233,19 @@ namespace hdiffpatchNode
     class PatchAsyncWorker : public Napi::AsyncWorker {
     public:
         PatchAsyncWorker(Napi::Function& callback,
-                         const Napi::Value& oldValue, const uint8_t* oldData, size_t oldLen,
-                         const Napi::Value& diffValue, const uint8_t* diffData, size_t diffLen)
+                         std::vector<uint8_t>&& oldData,
+                         std::vector<uint8_t>&& diffData,
+                         const HPatchLimits& limits)
             : Napi::AsyncWorker(callback),
-              oldData_(oldData),
-              oldLen_(oldLen),
-              diffData_(diffData),
-              diffLen_(diffLen),
-              oldRef_(Napi::Persistent(oldValue)),
-              diffRef_(Napi::Persistent(diffValue)) {
+              oldData_(std::move(oldData)),
+              diffData_(std::move(diffData)),
+              limits_(limits) {
         }
 
         void Execute() override {
             try {
-                hpatch(oldData_, oldLen_,
-                       diffData_, diffLen_, result_);
+                hpatch(oldData_.data(), oldData_.size(),
+                       diffData_.data(), diffData_.size(), result_, limits_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -194,25 +256,18 @@ namespace hdiffpatchNode
             Napi::HandleScope scope(env);
             Napi::Buffer<uint8_t> resultBuf = bufferFromVector(env, std::move(result_));
             Callback().Call({env.Null(), resultBuf});
-            oldRef_.Reset();
-            diffRef_.Reset();
         }
 
         void OnError(const Napi::Error& e) override {
             Napi::Env env = Env();
             Napi::HandleScope scope(env);
             Callback().Call({e.Value()});
-            oldRef_.Reset();
-            diffRef_.Reset();
         }
 
     private:
-        const uint8_t* oldData_;
-        size_t oldLen_;
-        const uint8_t* diffData_;
-        size_t diffLen_;
-        Napi::Reference<Napi::Value> oldRef_;
-        Napi::Reference<Napi::Value> diffRef_;
+        std::vector<uint8_t> oldData_;
+        std::vector<uint8_t> diffData_;
+        HPatchLimits limits_;
         std::vector<uint8_t> result_;
     };
 
@@ -265,16 +320,19 @@ namespace hdiffpatchNode
         PatchStreamAsyncWorker(Napi::Function& callback,
                                std::string oldPath,
                                std::string diffPath,
-                               std::string outNewPath)
+                               std::string outNewPath,
+                               const HPatchLimits& limits)
             : Napi::AsyncWorker(callback),
               oldPath_(std::move(oldPath)),
               diffPath_(std::move(diffPath)),
-              outNewPath_(std::move(outNewPath)) {
+              outNewPath_(std::move(outNewPath)),
+              limits_(limits) {
         }
 
         void Execute() override {
             try {
-                hpatch_stream(oldPath_.c_str(), diffPath_.c_str(), outNewPath_.c_str());
+                hpatch_stream(oldPath_.c_str(), diffPath_.c_str(), outNewPath_.c_str(),
+                              limits_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -296,6 +354,7 @@ namespace hdiffpatchNode
         std::string oldPath_;
         std::string diffPath_;
         std::string outNewPath_;
+        HPatchLimits limits_;
     };
 
     // ============ 异步 Single-compressed Patch Worker ============
@@ -304,16 +363,19 @@ namespace hdiffpatchNode
         PatchSingleStreamAsyncWorker(Napi::Function& callback,
                                      std::string oldPath,
                                      std::string diffPath,
-                                     std::string outNewPath)
+                                     std::string outNewPath,
+                                     const HPatchLimits& limits)
             : Napi::AsyncWorker(callback),
               oldPath_(std::move(oldPath)),
               diffPath_(std::move(diffPath)),
-              outNewPath_(std::move(outNewPath)) {
+              outNewPath_(std::move(outNewPath)),
+              limits_(limits) {
         }
 
         void Execute() override {
             try {
-                hpatch_single_stream(oldPath_.c_str(), diffPath_.c_str(), outNewPath_.c_str());
+                hpatch_single_stream(oldPath_.c_str(), diffPath_.c_str(), outNewPath_.c_str(),
+                                     limits_);
             } catch (const std::exception& e) {
                 SetError(e.what());
             }
@@ -335,6 +397,7 @@ namespace hdiffpatchNode
         std::string oldPath_;
         std::string diffPath_;
         std::string outNewPath_;
+        HPatchLimits limits_;
     };
 
     // ============ 异步 Single-compressed Stream Diff Worker ============
@@ -410,7 +473,9 @@ namespace hdiffpatchNode
         if (info.Length() > argIdx && info[argIdx].IsFunction()) {
             Napi::Function callback = info[argIdx].As<Napi::Function>();
             DiffAsyncWorker* worker = new DiffAsyncWorker(
-                callback, info[0], oldData, oldLength, info[1], newData, newLength,
+                callback,
+                copyBufferData(oldData, oldLength),
+                copyBufferData(newData, newLength),
                 options.compressionThreads
             );
             worker->Queue();
@@ -453,11 +518,23 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
+        HPatchLimits limits = defaultPatchLimitsMem();
+        size_t argIdx = 2;
+        if (info.Length() > argIdx && !info[argIdx].IsFunction()) {
+            if (!parsePatchOptions(env, info[argIdx], limits)) {
+                return env.Undefined();
+            }
+            argIdx++;
+        }
+
         // 如果提供了回调函数，使用异步模式
-        if (info.Length() > 2 && info[2].IsFunction()) {
-            Napi::Function callback = info[2].As<Napi::Function>();
+        if (info.Length() > argIdx && info[argIdx].IsFunction()) {
+            Napi::Function callback = info[argIdx].As<Napi::Function>();
             PatchAsyncWorker* worker = new PatchAsyncWorker(
-                callback, info[0], oldData, oldLength, info[1], diffData, diffLength
+                callback,
+                copyBufferData(oldData, oldLength),
+                copyBufferData(diffData, diffLength),
+                limits
             );
             worker->Queue();
             return env.Undefined();
@@ -466,7 +543,7 @@ namespace hdiffpatchNode
         // 同步模式
         std::vector<uint8_t> newBuf;
         try {
-            hpatch(oldData, oldLength, diffData, diffLength, newBuf);
+            hpatch(oldData, oldLength, diffData, diffLength, newBuf, limits);
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();
@@ -536,17 +613,26 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
-        if (info.Length() > 3 && info[3].IsFunction()) {
-            Napi::Function callback = info[3].As<Napi::Function>();
+        HPatchLimits limits = defaultPatchLimitsFile();
+        size_t argIdx = 3;
+        if (info.Length() > argIdx && !info[argIdx].IsFunction()) {
+            if (!parsePatchOptions(env, info[argIdx], limits)) {
+                return env.Undefined();
+            }
+            argIdx++;
+        }
+
+        if (info.Length() > argIdx && info[argIdx].IsFunction()) {
+            Napi::Function callback = info[argIdx].As<Napi::Function>();
             PatchStreamAsyncWorker* worker = new PatchStreamAsyncWorker(
-                callback, oldPath, diffPath, outNewPath
+                callback, oldPath, diffPath, outNewPath, limits
             );
             worker->Queue();
             return env.Undefined();
         }
 
         try {
-            hpatch_stream(oldPath.c_str(), diffPath.c_str(), outNewPath.c_str());
+            hpatch_stream(oldPath.c_str(), diffPath.c_str(), outNewPath.c_str(), limits);
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();
@@ -673,14 +759,15 @@ namespace hdiffpatchNode
         NativeDiffOptions options;
         size_t argIdx = 3;
         if (info.Length() > argIdx && info[argIdx].IsNumber()) {
-            double raw = info[argIdx].As<Napi::Number>().DoubleValue();
-            if (!std::isfinite(raw) || std::floor(raw) != raw || raw < 0 ||
-                raw > static_cast<double>(std::numeric_limits<size_t>::max())) {
-                Napi::TypeError::New(env, "Invalid windowSize: expected a non-negative integer.")
+            size_t windowSize = 0;
+            if (!parseIntegerOption(info[argIdx], 0,
+                                    std::numeric_limits<size_t>::max(), windowSize)) {
+                Napi::TypeError::New(env,
+                    "Invalid windowSize: expected a non-negative safe integer.")
                     .ThrowAsJavaScriptException();
                 return env.Undefined();
             }
-            options.windowSize = static_cast<size_t>(raw);
+            options.windowSize = windowSize;
             argIdx++;
         }
 
@@ -728,17 +815,27 @@ namespace hdiffpatchNode
             return env.Undefined();
         }
 
-        if (info.Length() > 3 && info[3].IsFunction()) {
-            Napi::Function callback = info[3].As<Napi::Function>();
+        HPatchLimits limits = defaultPatchLimitsFile();
+        size_t argIdx = 3;
+        if (info.Length() > argIdx && !info[argIdx].IsFunction()) {
+            if (!parsePatchOptions(env, info[argIdx], limits)) {
+                return env.Undefined();
+            }
+            argIdx++;
+        }
+
+        if (info.Length() > argIdx && info[argIdx].IsFunction()) {
+            Napi::Function callback = info[argIdx].As<Napi::Function>();
             PatchSingleStreamAsyncWorker* worker = new PatchSingleStreamAsyncWorker(
-                callback, oldPath, diffPath, outNewPath
+                callback, oldPath, diffPath, outNewPath, limits
             );
             worker->Queue();
             return env.Undefined();
         }
 
         try {
-            hpatch_single_stream(oldPath.c_str(), diffPath.c_str(), outNewPath.c_str());
+            hpatch_single_stream(oldPath.c_str(), diffPath.c_str(), outNewPath.c_str(),
+                                 limits);
         } catch (const std::exception& e) {
             Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
             return env.Undefined();

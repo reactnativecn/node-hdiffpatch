@@ -12,9 +12,9 @@ npm install node-hdiffpatch
 bun add node-hdiffpatch
 ```
 
-Prebuilt binaries are bundled for: `darwin-arm64`, `darwin-x64`, `linux-x64`,
-`linux-arm64` (glibc), and `win32-x64`. Other platforms are not supported by
-the published package.
+Prebuilt binaries are bundled for: `darwin-arm64`, `linux-x64`, and
+`linux-arm64` (glibc). Other platforms (including `darwin-x64` and `win32-x64`)
+are currently not supported by the published package.
 
 ## Development
 
@@ -31,6 +31,35 @@ bun run test:bun   # run the same tests under the Bun runtime
 
 ## Usage
 
+Binary inputs accept `Buffer`, any `TypedArray`, or `DataView`.
+
+**Transactional file outputs.** Every file-based API (`diffStream`,
+`diffSingleStream`, `diffWindow`, `patchStream`, `patchSingleStream`, and the
+CLI) writes to a random temp file in the output directory, verifies the
+result, then atomically renames it over the destination. On any failure the
+temp file is removed and an existing destination file is left untouched.
+This also makes in-place operation safe: the output path may be the same file
+as an input (including via relative-path aliases, hard links, or symlinks) —
+the input is only replaced after the operation fully succeeds.
+
+**Patch resource limits.** A patch header declares its output size and
+working-memory requirement; both come from untrusted data. All patch APIs
+enforce finite caps and reject oversized declarations before allocating
+memory or creating the output file. Defaults: `maxOutputBytes` is 2 GiB for
+the in-memory `patch()` and 16 GiB for `patchStream()`/`patchSingleStream()`;
+`maxWorkingMemoryBytes` is 256 MiB. Override per call via an options object:
+
+```js
+hdiffpatch.patch(oldBuf, diffBuf, { maxOutputBytes: 64 * 1024 * 1024 });
+hdiffpatch.patchSingleStream(oldPath, diffPath, outPath, {
+  maxOutputBytes: 512 * 1024 * 1024,
+  maxWorkingMemoryBytes: 8 * 1024 * 1024,
+});
+```
+
+These limits bound resource usage; they are not a substitute for verifying
+patch provenance (signatures) and final-file hashes in your update system.
+
 ### diff(originBuf, newBuf[, options])
 
 Compare two buffers and return a new hdiffpatch patch as return value.
@@ -40,6 +69,14 @@ All diff entry points accept an optional `options` object with
 match finder while preserving compression level 9 and the 8 MiB dictionary.
 The default remains one thread. `diffWindow()` also accepts `windowSize` in
 the options object; the legacy positional `windowSize` remains supported.
+
+**Async behavior.** Callback-style calls run on Node's shared libuv thread
+pool: one running task occupies one pool worker (plus up to two LZMA threads
+with `compressionThreads: 2`), so many concurrent diffs can delay other
+thread-pool consumers (`fs`, `zlib`, `crypto`, DNS). Queue or cap concurrency
+for server-side batch workloads. The async buffer APIs copy their inputs
+before returning, so mutating, transferring, or detaching the source buffers
+after the call cannot affect the result.
 
 ### diffSingleStream(oldPath, newPath, outDiffPath[, cb])
 
@@ -75,12 +112,13 @@ applies and compares the generated patch before it returns, so orchestration
 layers can avoid running a redundant second round-trip check.
 `capabilities.maxCompressionThreads` is `2`.
 
-### patchSingleStream(oldPath, diffPath, outNewPath[, cb])
+### patchSingleStream(oldPath, diffPath, outNewPath[, options][, cb])
 
 Apply a single-compressed hpatch payload created by `diff` or
 `diffSingleStream` from files. This is the file-level apply path for the normal in-memory `diff`
 format. In sync mode returns `outNewPath`. In async mode, callback signature is
-`(err, outNewPath)`.
+`(err, outNewPath)`. `options` accepts `maxOutputBytes` and
+`maxWorkingMemoryBytes` (see "Patch resource limits" above).
 
 ### diffStream(oldPath, newPath, outDiffPath[, cb])
 
@@ -88,10 +126,12 @@ Create diff file by streaming file paths (low memory). In sync mode returns
 `outDiffPath`. In async mode, callback signature is `(err, outDiffPath)`.
 The diff format is the streaming compressed format; use `patchStream` to apply it.
 
-### patchStream(oldPath, diffPath, outNewPath[, cb])
+### patchStream(oldPath, diffPath, outNewPath[, options][, cb])
 
 Apply diff file to old file and write new file by streaming. In sync mode
 returns `outNewPath`. In async mode, callback signature is `(err, outNewPath)`.
+`options` accepts `maxOutputBytes` and `maxWorkingMemoryBytes` (see "Patch
+resource limits" above).
 
 ## CLI
 

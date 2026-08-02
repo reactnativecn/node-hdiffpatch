@@ -13,13 +13,13 @@ function usage() {
       '',
       'Notes:',
       '  - Uses streaming diff/patch for low memory usage.',
-      '  - patch auto-detects the diff format (diffStream or diff/diffWithCovers output).',
+      '  - patch auto-detects the diff format (diffStream or diff/diffSingleStream output).',
       '  - Outputs are files specified by <outDiff>/<outNew>.',
     ].join('\n')
   );
 }
 
-// 两种 diff 格式的文件头:流式为 "HDIFF13",单压缩(diff()/diffWithCovers() 产物)为 "HDIFFSF20"
+// 两种 diff 格式的文件头:流式为 "HDIFF13",单压缩(diff()/diffSingleStream()/diffWindow() 产物)为 "HDIFFSF20"
 function detectDiffFormat(diffFile) {
   const header = Buffer.alloc(9);
   const fd = fs.openSync(diffFile, 'r');

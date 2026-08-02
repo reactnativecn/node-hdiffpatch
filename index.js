@@ -9,6 +9,7 @@ function loadNative() {
   }
 
   // 静态 require 路径便于打包工具分析；失败（缺文件、musl 等 ABI 不符）时回退 node-gyp-build
+  let prebuildError;
   try {
     switch (`${process.platform}-${process.arch}`) {
       case 'darwin-arm64':
@@ -22,9 +23,21 @@ function loadNative() {
       case 'win32-x64':
         return require('./prebuilds/win32-x64/node-hdiffpatch.node');
     }
-  } catch (err) {}
+  } catch (err) {
+    // 预编译文件存在但加载失败(GLIBC 版本、架构、缺失符号等)时,
+    // 真实的 dlopen 错误比 node-gyp-build 的笼统报错更有诊断价值,
+    // 保留为最终错误的 cause
+    prebuildError = err;
+  }
 
-  return require('node-gyp-build')(__dirname);
+  try {
+    return require('node-gyp-build')(__dirname);
+  } catch (err) {
+    if (prebuildError && err && err.cause === undefined) {
+      err.cause = prebuildError;
+    }
+    throw err;
+  }
 }
 
 const native = loadNative();

@@ -1,5 +1,6 @@
 /// <reference types="node" />
 
+/** Buffer、TypedArray 和 DataView 均可作为二进制输入。 */
 export type BinaryLike = Buffer | ArrayBufferView;
 
 export type DiffCallback = (err: Error | null, result?: Buffer) => void;
@@ -15,6 +16,20 @@ export interface DiffWindowOptions extends CompressionOptions {
   windowSize?: number;
 }
 
+/**
+ * patch 侧资源上限。补丁头声明的输出大小和工作内存来自不可信输入,
+ * 超出上限的补丁在任何分配或输出文件创建之前被拒绝。
+ */
+export interface PatchOptions {
+  /**
+   * 允许的最大输出字节数。默认:内存版 patch() 2 GiB,文件版
+   * patchStream()/patchSingleStream() 16 GiB。
+   */
+  maxOutputBytes?: number;
+  /** 允许的最大补丁工作内存(stepMemSize)字节数。默认 256 MiB。 */
+  maxWorkingMemoryBytes?: number;
+}
+
 export interface NativeAddon {
   diff(oldBuf: BinaryLike, newBuf: BinaryLike): Buffer;
   diff(oldBuf: BinaryLike, newBuf: BinaryLike, options: CompressionOptions): Buffer;
@@ -26,7 +41,14 @@ export interface NativeAddon {
     cb: DiffCallback
   ): void;
   patch(oldBuf: BinaryLike, diffBuf: BinaryLike): Buffer;
+  patch(oldBuf: BinaryLike, diffBuf: BinaryLike, options: PatchOptions): Buffer;
   patch(oldBuf: BinaryLike, diffBuf: BinaryLike, cb: DiffCallback): void;
+  patch(
+    oldBuf: BinaryLike,
+    diffBuf: BinaryLike,
+    options: PatchOptions,
+    cb: DiffCallback
+  ): void;
   diffStream(oldPath: string, newPath: string, outDiffPath: string): string;
   diffStream(
     oldPath: string,
@@ -52,6 +74,19 @@ export interface NativeAddon {
     oldPath: string,
     diffPath: string,
     outNewPath: string,
+    options: PatchOptions
+  ): string;
+  patchStream(
+    oldPath: string,
+    diffPath: string,
+    outNewPath: string,
+    cb: StreamCallback
+  ): void;
+  patchStream(
+    oldPath: string,
+    diffPath: string,
+    outNewPath: string,
+    options: PatchOptions,
     cb: StreamCallback
   ): void;
   diffSingleStream(oldPath: string, newPath: string, outDiffPath: string): string;
@@ -79,6 +114,19 @@ export interface NativeAddon {
     oldPath: string,
     diffPath: string,
     outNewPath: string,
+    options: PatchOptions
+  ): string;
+  patchSingleStream(
+    oldPath: string,
+    diffPath: string,
+    outNewPath: string,
+    cb: StreamCallback
+  ): void;
+  patchSingleStream(
+    oldPath: string,
+    diffPath: string,
+    outNewPath: string,
+    options: PatchOptions,
     cb: StreamCallback
   ): void;
   diffWindow(
@@ -149,6 +197,17 @@ export function patch(oldBuf: BinaryLike, diffBuf: BinaryLike): Buffer;
 export function patch(
   oldBuf: BinaryLike,
   diffBuf: BinaryLike,
+  options: PatchOptions
+): Buffer;
+export function patch(
+  oldBuf: BinaryLike,
+  diffBuf: BinaryLike,
+  cb: DiffCallback
+): void;
+export function patch(
+  oldBuf: BinaryLike,
+  diffBuf: BinaryLike,
+  options: PatchOptions,
   cb: DiffCallback
 ): void;
 
@@ -186,6 +245,19 @@ export function patchStream(
   oldPath: string,
   diffPath: string,
   outNewPath: string,
+  options: PatchOptions
+): string;
+export function patchStream(
+  oldPath: string,
+  diffPath: string,
+  outNewPath: string,
+  cb: StreamCallback
+): void;
+export function patchStream(
+  oldPath: string,
+  diffPath: string,
+  outNewPath: string,
+  options: PatchOptions,
   cb: StreamCallback
 ): void;
 export function diffSingleStream(
@@ -221,6 +293,19 @@ export function patchSingleStream(
   oldPath: string,
   diffPath: string,
   outNewPath: string,
+  options: PatchOptions
+): string;
+export function patchSingleStream(
+  oldPath: string,
+  diffPath: string,
+  outNewPath: string,
+  cb: StreamCallback
+): void;
+export function patchSingleStream(
+  oldPath: string,
+  diffPath: string,
+  outNewPath: string,
+  options: PatchOptions,
   cb: StreamCallback
 ): void;
 

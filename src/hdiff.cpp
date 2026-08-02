@@ -1,4 +1,5 @@
 #include "hdiff.h"
+#include "temp_output.h"
 #include "../HDiffPatch/libHDiffPatch/HDiff/diff.h"
 #include "../HDiffPatch/libHDiffPatch/HPatch/patch.h"
 #include "../HDiffPatch/file_for_patch.h"
@@ -292,21 +293,25 @@ void hdiff_stream(const char* oldPath,const char* newPath,const char* outDiffPat
     TCompressPlugin_lzma2 compressPlugin;
     configure_lzma2(compressPlugin, compressionThreads);
 
+    // tempOut 先于 streams 声明:异常展开时先关流(guard 析构)再删临时文件
+    hdiffpatchNode::TempOutputFile tempOut;
     FileStreamGuard streams;
     streams.openInputs(oldPath, newPath);
-    streams.openDiffOut(outDiffPath);
+    tempOut.create(outDiffPath);
+    streams.openDiffOut(tempOut.path());
 
     create_compressed_diff_stream(&streams.newStream.base, &streams.oldStream.base,
                                   &streams.diffOutStream.base,
                                   &compressPlugin.base, kMatchBlockSize_default);
 
     streams.closeDiffOut();
-    streams.openDiffIn(outDiffPath);
+    streams.openDiffIn(tempOut.path());
     if (!check_compressed_diff(&streams.newStream.base, &streams.oldStream.base,
                                &streams.diffInStream.base, decompressPlugin)) {
         throw std::runtime_error("check_compressed_diff() failed, diff code error!");
     }
     streams.closeAllOrThrow();
+    tempOut.commit();
 }
 
 void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPath,
@@ -319,9 +324,11 @@ void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPat
     TCompressPlugin_lzma2 compressPlugin;
     configure_lzma2(compressPlugin, compressionThreads);
 
+    hdiffpatchNode::TempOutputFile tempOut;
     FileStreamGuard streams;
     streams.openInputs(oldPath, newPath);
-    streams.openDiffOut(outDiffPath);
+    tempOut.create(outDiffPath);
+    streams.openDiffOut(tempOut.path());
 
     // window 模式:大块流式匹配拿大 cover,再在 old 数据的滑动窗口内做
     // 后缀串精修。窗口默认 2MB,可调大以捕获更长距离的内容移动;
@@ -337,13 +344,14 @@ void hdiff_window(const char* oldPath,const char* newPath,const char* outDiffPat
                                          kSingleMatchScore);
 
     streams.closeDiffOut();
-    normalize_single_raw_compress_type(outDiffPath);
-    streams.openDiffIn(outDiffPath);
+    normalize_single_raw_compress_type(tempOut.path());
+    streams.openDiffIn(tempOut.path());
     if (!check_single_compressed_diff(&streams.newStream.base, &streams.oldStream.base,
                                       &streams.diffInStream.base, decompressPlugin)) {
         throw std::runtime_error("check_single_compressed_diff() failed, diff code error!");
     }
     streams.closeAllOrThrow();
+    tempOut.commit();
 }
 
 void hdiff_single_stream(const char* oldPath,const char* newPath,const char* outDiffPath,
@@ -356,9 +364,11 @@ void hdiff_single_stream(const char* oldPath,const char* newPath,const char* out
     TCompressPlugin_lzma2 compressPlugin;
     configure_lzma2(compressPlugin, compressionThreads);
 
+    hdiffpatchNode::TempOutputFile tempOut;
     FileStreamGuard streams;
     streams.openInputs(oldPath, newPath);
-    streams.openDiffOut(outDiffPath);
+    tempOut.create(outDiffPath);
+    streams.openDiffOut(tempOut.path());
 
     create_single_compressed_diff_stream(&streams.newStream.base, &streams.oldStream.base,
                                          &streams.diffOutStream.base,
@@ -366,11 +376,12 @@ void hdiff_single_stream(const char* oldPath,const char* newPath,const char* out
                                          kMatchBlockSize_default);
 
     streams.closeDiffOut();
-    normalize_single_raw_compress_type(outDiffPath);
-    streams.openDiffIn(outDiffPath);
+    normalize_single_raw_compress_type(tempOut.path());
+    streams.openDiffIn(tempOut.path());
     if (!check_single_compressed_diff(&streams.newStream.base, &streams.oldStream.base,
                                       &streams.diffInStream.base, decompressPlugin)) {
         throw std::runtime_error("check_single_compressed_diff() failed, diff code error!");
     }
     streams.closeAllOrThrow();
+    tempOut.commit();
 }
