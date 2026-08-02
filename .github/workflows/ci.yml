@@ -6,6 +6,27 @@ on:
   pull_request:
 
 jobs:
+  # engines 声明 >=14.17.0:用新工具链构建(N-API 8,ABI 稳定),
+  # 再切到最低支持的 Node 运行时跑完整测试,保证契约真实被测过
+  engines-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --ignore-scripts
+      - run: bun run prebuild
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 14.17.0
+      - run: node --version && node test/test.js
+
   test:
     strategy:
       fail-fast: false
@@ -37,3 +58,36 @@ jobs:
       - run: bun run prebuild
       - run: node test/test.js
       - run: bun ./test/test.js
+      # 与 publish 一致:固定 Linux prebuild 的 glibc 符号版本上限
+      - name: Check glibc symbol ceiling
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          ceiling="2.33"
+          max=$(objdump -T prebuilds/*/*.node | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -Vu | tail -1)
+          test -n "$max"
+          echo "max required glibc: $max (ceiling: $ceiling)"
+          if [ "$(printf '%s\n%s\n' "$max" "$ceiling" | sort -V | tail -1)" != "$ceiling" ]; then
+            echo "::error::prebuild requires GLIBC_$max which exceeds the GLIBC_$ceiling ceiling"
+            exit 1
+          fi
+      # 安装 npm pack 产物并在无 build/Release 的环境加载,验证 prebuilds
+      # 命名契约与 files 白名单
+      - name: Smoke test packed tarball
+        run: |
+          set -euo pipefail
+          npm pack
+          mkdir -p "$RUNNER_TEMP/smoke"
+          cp node-hdiffpatch-*.tgz "$RUNNER_TEMP/smoke/"
+          cd "$RUNNER_TEMP/smoke"
+          npm init -y > /dev/null
+          npm install ./node-hdiffpatch-*.tgz
+          node -e "
+            const assert = require('assert');
+            const h = require('node-hdiffpatch');
+            const o = Buffer.from('hello world hello world');
+            const n = Buffer.from('hello brave new world!!');
+            const d = h.diff(o, n);
+            assert.deepStrictEqual(h.patch(o, d), n);
+            console.log('tarball smoke test ok');
+          "

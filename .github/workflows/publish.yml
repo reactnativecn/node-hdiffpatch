@@ -43,6 +43,40 @@ jobs:
       - run: bun run prebuild
       - run: node test/test.js
       - run: bun ./test/test.js
+      # 曾发生过 Ubuntu 24.04 构建把最低要求抬到 GLIBC_2.38、导致
+      # Ubuntu 22.04/Debian 12 无法加载的回归;此处固定符号版本上限
+      - name: Check glibc symbol ceiling
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          ceiling="2.33"
+          max=$(objdump -T prebuilds/*/*.node | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -Vu | tail -1)
+          test -n "$max"
+          echo "max required glibc: $max (ceiling: $ceiling)"
+          if [ "$(printf '%s\n%s\n' "$max" "$ceiling" | sort -V | tail -1)" != "$ceiling" ]; then
+            echo "::error::prebuild requires GLIBC_$max which exceeds the GLIBC_$ceiling ceiling"
+            exit 1
+          fi
+      # 用打包后的 tarball 独立验证:安装产物只含 prebuilds/,不得依赖
+      # 仓库里的 build/Release,同时钉死静态 require 的产物命名契约
+      - name: Smoke test packed tarball
+        run: |
+          set -euo pipefail
+          npm pack
+          mkdir -p "$RUNNER_TEMP/smoke"
+          cp node-hdiffpatch-*.tgz "$RUNNER_TEMP/smoke/"
+          cd "$RUNNER_TEMP/smoke"
+          npm init -y > /dev/null
+          npm install ./node-hdiffpatch-*.tgz
+          node -e "
+            const assert = require('assert');
+            const h = require('node-hdiffpatch');
+            const o = Buffer.from('hello world hello world');
+            const n = Buffer.from('hello brave new world!!');
+            const d = h.diff(o, n);
+            assert.deepStrictEqual(h.patch(o, d), n);
+            console.log('tarball smoke test ok');
+          "
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: prebuilds-${{ matrix.os }}-${{ matrix.arch }}
