@@ -59,11 +59,12 @@ jobs:
       - run: node test/test.js
       - run: bun ./test/test.js
       # 与 publish 一致:固定 Linux prebuild 的 glibc 符号版本上限
+      # (2.34 基线依据见 publish.yml,兼容 Ubuntu 22.04/Debian 12/RHEL 9)
       - name: Check glibc symbol ceiling
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          ceiling="2.33"
+          ceiling="2.34"
           max=$(objdump -T prebuilds/*/*.node | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -Vu | tail -1)
           test -n "$max"
           echo "max required glibc: $max (ceiling: $ceiling)"

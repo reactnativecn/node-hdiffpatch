@@ -44,12 +44,15 @@ jobs:
       - run: node test/test.js
       - run: bun ./test/test.js
       # 曾发生过 Ubuntu 24.04 构建把最低要求抬到 GLIBC_2.38、导致
-      # Ubuntu 22.04/Debian 12 无法加载的回归;此处固定符号版本上限
+      # Ubuntu 22.04/Debian 12 无法加载的回归;此处固定符号版本上限。
+      # 2.34 是现实基线:LZMA 多线程链接 pthread,在 glibc>=2.34 的
+      # 构建机上这些符号必然带 GLIBC_2.34 版本(v2.3.0 起即如此),
+      # 兼容 Ubuntu 22.04 / Debian 12 / RHEL 9。
       - name: Check glibc symbol ceiling
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          ceiling="2.33"
+          ceiling="2.34"
           max=$(objdump -T prebuilds/*/*.node | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -Vu | tail -1)
           test -n "$max"
           echo "max required glibc: $max (ceiling: $ceiling)"
